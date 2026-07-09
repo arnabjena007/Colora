@@ -26,6 +26,7 @@ interface TextAnnotationItem {
   y: number;
   fontSize: number;
   lineHeight: number;
+  color: string;
 }
 
 interface PictureItem {
@@ -44,6 +45,15 @@ interface PageState {
   canvasHeight: number;
   undoStack: ImageData[];
   redoStack: ImageData[];
+  notes: NoteItem[];
+  textAnnotations: TextAnnotationItem[];
+  pictures: PictureItem[];
+}
+
+interface DocumentSnapshot {
+  imageData: ImageData;
+  canvasWidth: number;
+  canvasHeight: number;
   notes: NoteItem[];
   textAnnotations: TextAnnotationItem[];
   pictures: PictureItem[];
@@ -132,6 +142,26 @@ const BLANK_PAGE_HEIGHT = 1060;
 const SUPPORTED_FILE_TYPES = "application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp";
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
+type SelectedObject =
+  | { kind: "text"; id: string }
+  | { kind: "note"; id: string }
+  | { kind: "picture"; id: string }
+  | { kind: "page" };
+type KeyboardActions = {
+  clearActiveTool: () => void;
+  undo: () => void;
+  redo: () => void;
+  openFile: () => void;
+  addBlankPage: () => void;
+  exportPDF: () => void;
+  selectTool: (tool: string) => void;
+  addNote: () => void;
+  addPicture: () => void;
+  deleteCurrentPage: () => void;
+  goPage: (dir: "prev" | "next") => void;
+  changeZoom: (next: number) => void;
+  changeViewMode: (mode: ViewMode) => void;
+};
 
 const SHAPE_TOOLS = new Set<string>(["rect", "ellipse", "diamond", "line", "arrow"]);
 
@@ -246,6 +276,13 @@ const loadImageElement = (file: File) => new Promise<HTMLImageElement>((resolve,
   image.src = url;
 });
 
+const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result));
+  reader.onerror = () => reject(new Error("Could not read file"));
+  reader.readAsDataURL(file);
+});
+
 function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
   const maxEdge = 1600;
   const ratio = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
@@ -287,13 +324,17 @@ export default function EditorPage() {
   const [showToast, setShowToast] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("fit-width");
-  const [zoomLevel, setZoomLevel] = useState(0.5);
+  const [zoomLevel, setZoomLevel] = useState(0.7);
   const [includePageNumbers, setIncludePageNumbers] = useState(false);
   const [signatureText, setSignatureText] = useState("");
   const [textFontSize, setTextFontSize] = useState(18);
   const [textLineHeight, setTextLineHeight] = useState(1.35);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  const [picturePickerTick, setPicturePickerTick] = useState(0);
+  const [showShapeMenu, setShowShapeMenu] = useState(false);
+  const [selectedObject, setSelectedObject] = useState<SelectedObject | null>(null);
+  const [showHelpPanel, setShowHelpPanel] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
 
   const annotCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -304,8 +345,8 @@ export default function EditorPage() {
   const insertPdfInputRef = useRef<HTMLInputElement | null>(null);
   const mergePdfInputRef = useRef<HTMLInputElement | null>(null);
   const blankDocRef = useRef<PdfDocument | null>(null);
-  const undoListRef = useRef<ImageData[]>([]);
-  const redoListRef = useRef<ImageData[]>([]);
+  const undoListRef = useRef<DocumentSnapshot[]>([]);
+  const redoListRef = useRef<DocumentSnapshot[]>([]);
   const isDrawingRef = useRef(false);
   const lastXRef = useRef(0);
   const lastYRef = useRef(0);
@@ -315,6 +356,7 @@ export default function EditorPage() {
   const pageRenderingRef = useRef(false);
   const pageNumPendingRef = useRef<number | null>(null);
   const pdfjsLibRef = useRef<PdfJsLib | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   const activeToolRef = useRef("highlighter");
   const activeColorRef = useRef(DEFAULT_HIGHLIGHT_COLOR);
   const brushWidthRef = useRef(22);
@@ -327,11 +369,28 @@ export default function EditorPage() {
   const notesRef = useRef<NoteItem[]>([]);
   const textAnnotationsRef = useRef<TextAnnotationItem[]>([]);
   const picturesRef = useRef<PictureItem[]>([]);
+  const selectedObjectRef = useRef<SelectedObject | null>(null);
+  const isPdfLoadedRef = useRef(false);
   const darkModeRef = useRef(false);
   const viewModeRef = useRef<ViewMode>("fit-width");
   const zoomLevelRef = useRef(0.5);
   const includePageNumbersRef = useRef(false);
   const signatureTextRef = useRef("");
+  const keyboardActionsRef = useRef<KeyboardActions>({
+    clearActiveTool: () => {},
+    undo: () => {},
+    redo: () => {},
+    openFile: () => {},
+    addBlankPage: () => {},
+    exportPDF: () => {},
+    selectTool: () => {},
+    addNote: () => {},
+    addPicture: () => {},
+    deleteCurrentPage: () => {},
+    goPage: () => {},
+    changeZoom: () => {},
+    changeViewMode: () => {},
+  });
 
   // Keep refs in sync with state (for event handlers)
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
@@ -340,6 +399,8 @@ export default function EditorPage() {
   useEffect(() => { notesRef.current = notes; }, [notes]);
   useEffect(() => { textAnnotationsRef.current = textAnnotations; }, [textAnnotations]);
   useEffect(() => { picturesRef.current = pictures; }, [pictures]);
+  useEffect(() => { selectedObjectRef.current = selectedObject; }, [selectedObject]);
+  useEffect(() => { isPdfLoadedRef.current = isPdfLoaded; }, [isPdfLoaded]);
   useEffect(() => { pageNumRef.current = pageNum; }, [pageNum]);
   useEffect(() => { darkModeRef.current = darkMode; }, [darkMode]);
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
@@ -353,18 +414,13 @@ export default function EditorPage() {
     setTimeout(() => setShowToast(false), 2000);
   }, []);
 
-  const addPicture = useCallback(() => {
-    setPicturePickerTick(tick => tick + 1);
-  }, []);
-
-  useEffect(() => {
-    if (picturePickerTick > 0) pictureInputRef.current?.click();
-  }, [picturePickerTick]);
-
   const clearActiveTool = useCallback(() => {
     setActiveTool("");
     activeToolRef.current = "";
     isDrawingRef.current = false;
+    setSelectedObject(null);
+    selectedObjectRef.current = null;
+    setShowHelpPanel(false);
     const canvas = annotCanvasRef.current;
     if (canvas) {
       canvas.style.pointerEvents = "none";
@@ -380,30 +436,38 @@ export default function EditorPage() {
     toast("Tool cleared");
   }, [toast]);
 
-  useEffect(() => {
-    const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key !== "Escape") return;
-      ev.preventDefault();
-      clearActiveTool();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [clearActiveTool]);
-
-  const saveState = useCallback(() => {
+  const captureSnapshot = useCallback((): DocumentSnapshot | null => {
     const canvas = annotCanvasRef.current;
     if (!canvas || canvas.width === 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    undoListRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    if (undoListRef.current.length > 30) undoListRef.current.shift();
-    redoListRef.current = [];
+    return {
+      imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      notes: notesRef.current.map(n => ({ ...n })),
+      textAnnotations: textAnnotationsRef.current.map(t => ({ ...t })),
+      pictures: picturesRef.current.map(p => ({ ...p })),
+    };
   }, []);
 
-  const restoreState = useCallback((data: ImageData) => {
+  const saveState = useCallback(() => {
+    const snapshot = captureSnapshot();
+    if (!snapshot) return;
+    undoListRef.current.push(snapshot);
+    if (undoListRef.current.length > 30) undoListRef.current.shift();
+    redoListRef.current = [];
+  }, [captureSnapshot]);
+
+  const restoreState = useCallback((snapshot: DocumentSnapshot) => {
     const canvas = annotCanvasRef.current;
     if (!canvas) return;
-    canvas.getContext("2d")?.putImageData(data, 0, 0);
+    canvas.width = snapshot.canvasWidth;
+    canvas.height = snapshot.canvasHeight;
+    canvas.getContext("2d")?.putImageData(snapshot.imageData, 0, 0);
+    setNotes(snapshot.notes.map(n => ({ ...n })));
+    setTextAnnotations(snapshot.textAnnotations.map(t => ({ ...t })));
+    setPictures(snapshot.pictures.map(p => ({ ...p })));
   }, []);
 
   const savePageState = useCallback((num: number) => {
@@ -588,12 +652,20 @@ export default function EditorPage() {
 
   // ─── NOTES ────────────────────────────────────────────────────────
   const addNote = () => {
-    const id = Date.now().toString(36);
+    const id = crypto.randomUUID();
     setNotes(prev => [...prev, { id, text: "Click to edit...", x: 160, y: 220 + prev.length * 100 }]);
+    setSelectedObject({ kind: "note", id });
     toast("Note added");
   };
 
-  const removeNote = (id: string) => setNotes(p => p.filter(n => n.id !== id));
+  const removeNote = useCallback((id: string) => {
+    saveState();
+    setNotes(p => p.filter(n => n.id !== id));
+    if (selectedObjectRef.current?.kind === "note" && selectedObjectRef.current.id === id) {
+      setSelectedObject(null);
+      selectedObjectRef.current = null;
+    }
+  }, [saveState]);
   const updateNote = (id: string, text: string) =>
     setNotes(p => p.map(n => n.id === id ? { ...n, text } : n));
 
@@ -626,23 +698,26 @@ export default function EditorPage() {
     if (!file || !isPdfLoaded) return;
     try {
       const image = await loadImageElement(file);
+      const src = await readFileAsDataUrl(file);
+      const id = `${Date.now().toString(36)}-${file.name}`;
       const container = containerRef.current;
-      const maxWidth = Math.min(320, (container?.clientWidth ?? 640) * 0.5);
+      const maxWidth = Math.min(320, (container?.clientWidth ?? 640) * 0.42);
       const ratio = image.naturalWidth ? image.naturalHeight / image.naturalWidth : 1;
-      const width = Math.max(80, maxWidth);
-      const height = Math.max(60, width * ratio);
+      const width = Math.max(140, maxWidth);
+      const height = Math.max(100, width * ratio);
       const x = Math.max(24, ((container?.clientWidth ?? width) - width) / 2);
       const y = Math.max(24, ((container?.clientHeight ?? height) - height) / 2);
 
       setPictures(prev => [...prev, {
-        id: `${Date.now().toString(36)}-${file.name}`,
-        src: image.src,
+        id,
+        src,
         name: file.name,
         x,
         y,
         width,
         height,
       }]);
+      setSelectedObject({ kind: "picture", id });
       toast("Picture added");
     } catch {
       toast("Could not add picture");
@@ -651,7 +726,14 @@ export default function EditorPage() {
     }
   };
 
-  const removePicture = (id: string) => setPictures(p => p.filter(pic => pic.id !== id));
+  const removePicture = useCallback((id: string) => {
+    saveState();
+    setPictures(p => p.filter(pic => pic.id !== id));
+    if (selectedObjectRef.current?.kind === "picture" && selectedObjectRef.current.id === id) {
+      setSelectedObject(null);
+      selectedObjectRef.current = null;
+    }
+  }, [saveState]);
 
   const dragPicture = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -676,6 +758,66 @@ export default function EditorPage() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
+
+  const resizePicture = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const picture = pictures.find(pic => pic.id === id);
+    if (!picture) return;
+    const handle = (e.currentTarget as HTMLElement).dataset.handle ?? "se";
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const start = { x: picture.x, y: picture.y, w: picture.width, h: picture.height };
+    const aspect = picture.height / Math.max(1, picture.width);
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
+      const next = { ...start };
+
+      if (handle.includes("e")) next.w = Math.max(120, start.w + dx);
+      if (handle.includes("s")) next.h = Math.max(80, start.h + dy);
+      if (handle.includes("w")) {
+        next.w = Math.max(120, start.w - dx);
+        next.x = start.x + (start.w - next.w);
+      }
+      if (handle.includes("n")) {
+        next.h = Math.max(80, start.h - dy);
+        next.y = start.y + (start.h - next.h);
+      }
+
+      // Keep the image from distorting too aggressively when only one axis moves.
+      if (handle === "e" || handle === "w") next.h = Math.max(80, next.w * aspect);
+      if (handle === "n" || handle === "s") next.w = Math.max(120, next.h / Math.max(0.01, aspect));
+
+      setPictures(p => p.map(pic => pic.id === id ? {
+        ...pic,
+        x: next.x,
+        y: next.y,
+        width: next.w,
+        height: next.h,
+      } : pic));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const resizeHandleStyle = (position: React.CSSProperties, cursor: React.CSSProperties["cursor"]): React.CSSProperties => ({
+    position: "absolute",
+    width: "18px",
+    height: "18px",
+    borderRadius: "6px",
+    border: `1px solid ${dm ? "rgba(255,255,255,0.3)" : "rgba(94,93,106,0.22)"}`,
+    background: c.panelBg,
+    boxShadow: "0 8px 18px rgba(37,50,74,0.18)",
+    cursor,
+    zIndex: 3,
+    ...position,
+  });
 
   // ─── CANVAS DRAWING ───────────────────────────────────────────────
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -762,6 +904,7 @@ export default function EditorPage() {
 
   // ─── TEXT ANNOTATION ──────────────────────────────────────────────
   const finishTextEdit = (textId: string, nextText: string) => {
+    saveState();
     const clean = nextText.replace(/\r/g, "").trimEnd();
     if (!clean) {
       setTextAnnotations(prev => prev.filter(t => t.id !== textId));
@@ -788,8 +931,10 @@ export default function EditorPage() {
       y,
       fontSize: textFontSize,
       lineHeight: textLineHeight,
+      color: activeColorRef.current,
     }]);
     setEditingTextId(id);
+    saveState();
   };
 
   const insertSignatureAt = (clientX: number, clientY: number) => {
@@ -828,6 +973,8 @@ export default function EditorPage() {
     e.stopPropagation();
     setTextFontSize(annotation.fontSize);
     setTextLineHeight(annotation.lineHeight);
+    setActiveColor(annotation.color);
+    activeColorRef.current = annotation.color;
     setEditingTextId(annotation.id);
   };
 
@@ -840,6 +987,30 @@ export default function EditorPage() {
     if (activeToolRef.current === "signature") insertSignatureAt(e.clientX, e.clientY);
     else insertTextAt(e.clientX, e.clientY);
   };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement | null;
+        if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+        e.preventDefault();
+        setShowHelpPanel(v => !v);
+      }
+      if (e.key === "Escape") {
+        setSelectedObject(null);
+        selectedObjectRef.current = null;
+        setShowHelpPanel(false);
+      }
+      if ((e.key === "Backspace" || e.key === "Delete") && selectedObjectRef.current) {
+        const current = selectedObjectRef.current;
+        if (current.kind === "note") removeNote(current.id);
+        if (current.kind === "picture") removePicture(current.id);
+        if (current.kind === "text") setTextAnnotations(prev => prev.filter(t => t.id !== current.id));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [removeNote, removePicture]);
 
   // ─── SELECTION HIGHLIGHTER ────────────────────────────────────────
   useEffect(() => {
@@ -897,7 +1068,8 @@ export default function EditorPage() {
         }
       } else if (file.type.startsWith("image/")) {
         const image = await loadImageElement(file);
-        nextPages.push({ doc: createImagePdfDocument(image), pageNumber: 1, name: file.name });
+        const doc = createImagePdfDocument(image);
+        nextPages.push({ doc, pageNumber: 1, name: file.name });
       }
     }
 
@@ -1179,6 +1351,29 @@ export default function EditorPage() {
     });
   };
 
+  const drawTextAnnotationsForExport = (
+    ctx: CanvasRenderingContext2D,
+    pageState: PageState,
+    scaleX: number,
+    scaleY: number
+  ) => {
+    pageState.textAnnotations.forEach(annotation => {
+      ctx.save();
+      ctx.fillStyle = annotation.color ?? TEXT_COLOR;
+      ctx.font = `${annotation.fontSize * scaleY}px 'Excalifont', 'Instrument Sans', Arial, sans-serif`;
+      ctx.textBaseline = "top";
+      const lines = annotation.text.split("\n");
+      lines.forEach((line, index) => {
+        ctx.fillText(
+          line,
+          annotation.x * scaleX + 6 * scaleX,
+          annotation.y * scaleY + 4 * scaleY + index * annotation.fontSize * annotation.lineHeight * scaleY
+        );
+      });
+      ctx.restore();
+    });
+  };
+
   const drawPicturesForExport = async (
     ctx: CanvasRenderingContext2D,
     pageState: PageState,
@@ -1297,6 +1492,7 @@ export default function EditorPage() {
           ann.getContext("2d")?.putImageData(state.imageData, 0, 0);
           ctx.drawImage(ann, 0, 0, canvas.width, canvas.height);
           await drawPicturesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
+          drawTextAnnotationsForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
           drawNotesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
         }
         if (includePageNumbersRef.current) {
@@ -1321,6 +1517,208 @@ export default function EditorPage() {
       toast("Could not export PDF");
     }
   };
+
+  useEffect(() => {
+    keyboardActionsRef.current = {
+      clearActiveTool,
+      undo,
+      redo,
+      openFile: () => fileInputRef.current?.click(),
+      addBlankPage,
+      exportPDF: () => { void exportPDF(); },
+      selectTool,
+      addNote,
+      addPicture: () => pictureInputRef.current?.click(),
+      deleteCurrentPage,
+      goPage,
+      changeZoom,
+      changeViewMode,
+    };
+  });
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return !!el?.closest("input, textarea, select, [contenteditable='true']");
+    };
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      const key = ev.key.toLowerCase();
+      const command = ev.ctrlKey || ev.metaKey;
+      const editing = isEditableTarget(ev.target);
+      const actions = keyboardActionsRef.current;
+      const loaded = isPdfLoadedRef.current;
+
+      if (key === "escape") {
+        ev.preventDefault();
+        actions.clearActiveTool();
+        return;
+      }
+
+      if (command) {
+        if (key === "z") {
+          ev.preventDefault();
+          if (ev.shiftKey) actions.redo();
+          else actions.undo();
+          return;
+        }
+        if (key === "y") {
+          ev.preventDefault();
+          actions.redo();
+          return;
+        }
+        if (key === "o") {
+          ev.preventDefault();
+          actions.openFile();
+          return;
+        }
+        if (key === "n") {
+          ev.preventDefault();
+          actions.addBlankPage();
+          return;
+        }
+        if (key === "s") {
+          ev.preventDefault();
+          actions.exportPDF();
+          return;
+        }
+      }
+
+      if (editing) return;
+
+      if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+
+      const toolShortcuts: Record<string, string> = {
+        h: "highlighter",
+        v: "hand",
+        p: "pencil",
+        d: "pencil",
+        t: "text",
+        s: "signature",
+        e: "eraser",
+        r: "rect",
+        l: "line",
+        a: "arrow",
+        m: "diamond",
+        o: "ellipse",
+      };
+
+      if (key in toolShortcuts && loaded) {
+        ev.preventDefault();
+        actions.selectTool(toolShortcuts[key]);
+        return;
+      }
+
+      if (key === "n" && loaded) {
+        ev.preventDefault();
+        actions.addNote();
+        return;
+      }
+      if (key === "i" && loaded) {
+        ev.preventDefault();
+        actions.addPicture();
+        return;
+      }
+      if (key === "delete" && loaded) {
+        ev.preventDefault();
+        actions.deleteCurrentPage();
+        return;
+      }
+      if ((key === "arrowleft" || key === "pageup") && loaded) {
+        ev.preventDefault();
+        actions.goPage("prev");
+        return;
+      }
+      if ((key === "arrowright" || key === "pagedown") && loaded) {
+        ev.preventDefault();
+        actions.goPage("next");
+        return;
+      }
+      if ((key === "+" || key === "=") && loaded) {
+        ev.preventDefault();
+        actions.changeZoom(zoomLevelRef.current + 0.1);
+        return;
+      }
+      if ((key === "-" || key === "_") && loaded) {
+        ev.preventDefault();
+        actions.changeZoom(zoomLevelRef.current - 0.1);
+        return;
+      }
+      if (key === "0" && loaded) {
+        ev.preventDefault();
+        actions.changeViewMode("fit-width");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
+  useEffect(() => {
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      setIsSaving(true);
+      setLastSavedLabel("Saving...");
+      const payload = {
+        version: 1,
+        savedAt: Date.now(),
+        docTitle,
+        docSubtitle,
+        notes: notesRef.current,
+        textAnnotations: textAnnotationsRef.current,
+        pictures: picturesRef.current,
+        includePageNumbers: includePageNumbersRef.current,
+        darkMode: darkModeRef.current,
+        viewMode: viewModeRef.current,
+        zoomLevel: zoomLevelRef.current,
+        pageNum: pageNumRef.current,
+        totalPages,
+        selectedObject: selectedObjectRef.current,
+      };
+      window.localStorage.setItem("pastelle-editor-state", JSON.stringify(payload));
+      setIsSaving(false);
+      setLastSavedLabel(`Saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+    }, 250);
+    return () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    };
+  }, [
+    docTitle,
+    docSubtitle,
+    notes,
+    textAnnotations,
+    pictures,
+    includePageNumbers,
+    darkMode,
+    viewMode,
+    zoomLevel,
+    pageNum,
+    totalPages,
+    selectedObject,
+  ]);
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem("pastelle-editor-state");
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw);
+      window.setTimeout(() => {
+        if (saved.docTitle) setDocTitle(saved.docTitle);
+        if (saved.docSubtitle) setDocSubtitle(saved.docSubtitle);
+        if (Array.isArray(saved.notes)) setNotes(saved.notes);
+        if (Array.isArray(saved.textAnnotations)) setTextAnnotations(saved.textAnnotations);
+        if (Array.isArray(saved.pictures)) setPictures(saved.pictures);
+        if (typeof saved.includePageNumbers === "boolean") setIncludePageNumbers(saved.includePageNumbers);
+        if (typeof saved.darkMode === "boolean") setDarkMode(saved.darkMode);
+        if (typeof saved.viewMode === "string") setViewMode(saved.viewMode);
+        if (typeof saved.zoomLevel === "number") setZoomLevel(saved.zoomLevel);
+        if (typeof saved.pageNum === "number") setPageNum(saved.pageNum);
+        setLastSavedLabel("Recovered local draft");
+      }, 0);
+    } catch {
+      // Ignore malformed local state.
+    }
+  }, []);
 
   // ─── THEME ────────────────────────────────────────────────────────
   const dm = darkMode;
@@ -1375,6 +1773,36 @@ export default function EditorPage() {
       </button>
     );
   };
+
+  const shapeToolBtn = (id: string, icon: React.ReactNode, label: string) => (
+    <button
+      key={id}
+      onClick={() => {
+        selectTool(id);
+        setShowShapeMenu(false);
+      }}
+      title={label}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        width: "100%",
+        padding: "9px 10px",
+        borderRadius: "10px",
+        border: "none",
+        cursor: "pointer",
+        background: activeTool === id ? c.toolActive : "transparent",
+        color: activeTool === id ? c.toolActiveTxt : c.toolInactiveTxt,
+        fontSize: "12px",
+        fontWeight: 800,
+        fontFamily: "inherit",
+        textAlign: "left",
+      }}
+    >
+      <span style={{ width: "20px", height: "20px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{icon}</span>
+      <span>{label}</span>
+    </button>
+  );
 
   const pageDockBtnStyle = (theme: typeof c, active = false): React.CSSProperties => ({
     width: "36px",
@@ -1452,6 +1880,9 @@ export default function EditorPage() {
                 onClick={() => {
                   setActiveColor(col.hex);
                   activeColorRef.current = col.hex;
+                  if (editingTextId && activeTool === "text") {
+                    setTextAnnotations(prev => prev.map(t => t.id === editingTextId ? { ...t, color: col.hex } : t));
+                  }
                 }}
                 title={col.name}
                 style={{
@@ -1567,6 +1998,9 @@ export default function EditorPage() {
 
         {/* Right actions */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 800, color: c.docMuted, minWidth: "110px", textAlign: "right" }}>
+            {isSaving ? "Saving..." : lastSavedLabel}
+          </span>
           <button onClick={undo} title="Undo" style={{
             width: "36px", height: "36px", border: `1px solid ${c.headerBorder}`,
             borderRadius: "9px", background: "transparent", cursor: "pointer",
@@ -1588,18 +2022,6 @@ export default function EditorPage() {
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
           >
             <Redo2 size={16} />
-          </button>
-          <button
-            onClick={() => setDarkMode(d => !d)}
-            title="Toggle dark mode"
-            style={{
-              width: "36px", height: "36px", border: `1px solid ${c.headerBorder}`,
-              borderRadius: "9px", background: "transparent", cursor: "pointer",
-              display: isPdfLoaded ? "flex" : "none", alignItems: "center", justifyContent: "center",
-              color: dm ? "#DFA7B5" : c.docMuted, transition: "all 0.15s",
-            }}
-          >
-            {dm ? <Sun size={16} /> : <Moon size={16} />}
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -1650,30 +2072,58 @@ export default function EditorPage() {
           {toolBtn("pencil",      <Pencil size={20} />,      "Draw")}
           {toolBtn("text",        <Type size={20} />,        "Text")}
           {toolBtn("signature",   <PenLine size={20} />,     "Sign")}
-          {toolBtn("picture-btn",  <ImageIcon size={20} />,   "Picture", addPicture)}
-          {toolBtn("rect",        <Square size={20} />,      "Rect")}
-          {toolBtn("ellipse",     <Circle size={20} />,      "Ellipse")}
-          {toolBtn("diamond",     <Diamond size={20} />,     "Diamond")}
-          {toolBtn("line",        <Minus size={20} />,       "Line")}
-          {toolBtn("arrow",       <ArrowRight size={20} />,   "Arrow")}
+          <div style={{ position: "relative", width: "100%" }}>
+            <button
+              onClick={() => setShowShapeMenu(v => !v)}
+              title="Shapes"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "5px",
+                padding: "10px 6px",
+                borderRadius: "12px",
+                width: "100%",
+                border: "none",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+                background: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActive : "transparent",
+                color: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActiveTxt : c.toolInactiveTxt,
+                fontWeight: 700,
+                fontSize: "10px",
+                letterSpacing: "0.03em",
+              }}
+            >
+              <div style={{ width: "22px", height: "22px" }}>
+                <Square size={20} />
+              </div>
+              <span>Shapes</span>
+            </button>
+            {showShapeMenu && (
+              <div style={{
+                position: "absolute",
+                left: "58px",
+                top: "0",
+                zIndex: 80,
+                width: "150px",
+                padding: "8px",
+                borderRadius: "14px",
+                border: `1px solid ${c.panelBorder}`,
+                background: c.panelBg,
+                boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
+              }}>
+                {shapeToolBtn("rect", <Square size={14} />, "Rect")}
+                {shapeToolBtn("ellipse", <Circle size={14} />, "Ellipse")}
+                {shapeToolBtn("diamond", <Diamond size={14} />, "Diamond")}
+                {shapeToolBtn("line", <Minus size={14} />, "Line")}
+                {shapeToolBtn("arrow", <ArrowRight size={14} />, "Arrow")}
+              </div>
+            )}
+          </div>
           {toolBtn("eraser",      <Eraser size={20} />,      "Eraser")}
           {toolBtn("note-btn",    <MessageSquare size={20} />, "Note", addNote)}
           </div>
         </div>
-
-        <button
-          onClick={() => setDarkMode(d => !d)}
-          style={{
-            display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "center",
-            gap: "4px", padding: "10px 6px", borderRadius: "12px", width: "100%",
-            border: "none", cursor: "pointer", background: "transparent",
-            color: dm ? "#DFA7B5" : c.toolInactiveTxt,
-            fontSize: "10px", fontWeight: 700, fontFamily: "inherit",
-          }}
-        >
-          {dm ? <Sun size={20} /> : <Moon size={20} />}
-          <span>{dm ? "Light" : "Dark"}</span>
-        </button>
       </aside>
 
       {/* ── MAIN CANVAS ─────────────────────────────────────────────── */}
@@ -1682,7 +2132,7 @@ export default function EditorPage() {
         background: c.bg, overflowY: "auto", overflowX: "hidden",
         display: "flex", flexDirection: "column", alignItems: "center",
         minWidth: 0, minHeight: 0,
-        padding: isPdfLoaded ? "32px 96px 80px 40px" : "0",
+        padding: isPdfLoaded ? "32px 40px 80px 40px" : "0",
         transition: "background 0.2s",
       }}>
 
@@ -1690,6 +2140,29 @@ export default function EditorPage() {
         <div
           ref={containerRef}
           onMouseDownCapture={onDocumentMouseDownCapture}
+          onClick={() => {
+            setSelectedObject(null);
+            selectedObjectRef.current = null;
+          }}
+          onDragOver={e => { e.preventDefault(); }}
+          onDrop={async e => {
+            e.preventDefault();
+            const files = Array.from(e.dataTransfer.files || []);
+            if (!files.length) return;
+            const accepted = files.filter(file => file.type === "application/pdf" || file.type.startsWith("image/"));
+            if (!accepted.length) return;
+            if (!isPdfLoaded) return;
+            const imageFiles = accepted.filter(file => file.type.startsWith("image/"));
+            if (imageFiles.length) {
+              const file = imageFiles[0];
+              const image = await loadImageElement(file);
+              const src = await readFileAsDataUrl(file);
+              const id = `${Date.now().toString(36)}-${file.name}`;
+              setPictures(prev => [...prev, { id, src, name: file.name, x: 24, y: 24, width: Math.max(180, image.naturalWidth * 0.3), height: Math.max(120, image.naturalHeight * 0.3) }]);
+              setSelectedObject({ kind: "picture", id });
+              toast("Image embedded");
+            }
+          }}
           style={{
             position: "relative",
             background: isPdfLoaded ? c.docBg : "transparent",
@@ -1751,6 +2224,18 @@ export default function EditorPage() {
                   value={annotation.text}
                   wrap="off"
                   autoFocus
+                  onFocus={e => {
+                    const el = e.currentTarget;
+                    requestAnimationFrame(() => {
+                      el.style.width = "auto";
+                      el.style.width = `${Math.max(180, el.scrollWidth + 18)}px`;
+                      el.style.height = "auto";
+                      el.style.height = `${Math.max(
+                        annotation.fontSize * annotation.lineHeight + 24,
+                        el.scrollHeight + 4
+                      )}px`;
+                    });
+                  }}
                   onChange={e => {
                     const nextValue = e.target.value.replace(/\r/g, "");
                     setTextAnnotations(prev => prev.map(t => t.id === annotation.id ? { ...t, text: nextValue } : t));
@@ -1759,28 +2244,38 @@ export default function EditorPage() {
                   onKeyDown={e => {
                     if (e.key === "Escape") {
                       e.preventDefault();
-                      finishTextEdit(annotation.id, "");
+                      setEditingTextId(null);
                     }
                   }}
                   onInput={e => {
                     const el = e.currentTarget;
                     el.style.width = "auto";
-                    el.style.width = `${Math.max(140, el.scrollWidth + 12)}px`;
+                    el.style.width = `${Math.max(180, el.scrollWidth + 18)}px`;
+                    el.style.height = "auto";
+                    el.style.height = `${Math.max(
+                      annotation.fontSize * annotation.lineHeight + 24,
+                      el.scrollHeight + 4
+                    )}px`;
                   }}
                   style={{
                     position: "absolute",
                     left: annotation.x,
                     top: annotation.y,
                     zIndex: 60,
-                    minWidth: "140px",
-                    width: "140px",
-                    minHeight: `${Math.max(38, annotation.fontSize * annotation.lineHeight + 12)}px`,
-                    padding: "4px 6px 6px",
-                    borderRadius: "6px 6px 0 0",
-                    border: "none",
+                    minWidth: "180px",
+                    width: "180px",
+                    minHeight: `${Math.max(48, annotation.fontSize * annotation.lineHeight + 24)}px`,
+                    height: `${Math.max(48, annotation.fontSize * annotation.lineHeight + 24)}px`,
+                    padding: "10px 12px 14px",
+                    borderRadius: "12px",
+                    border: `1.5px solid ${darkMode ? "rgba(246,234,242,0.38)" : "rgba(94,93,106,0.24)"}`,
                     outline: "none",
-                    color: activeColor,
-                    background: darkMode ? "rgba(23, 27, 36, 0.92)" : "rgba(252, 251, 255, 0.9)",
+                    color: darkMode ? "#FFFFFF" : (annotation.color ?? activeColor),
+                    background: darkMode
+                      ? "linear-gradient(to bottom, transparent calc(100% - 1px), rgba(246,234,242,0.28) 1px), #202633"
+                      : "linear-gradient(to bottom, transparent calc(100% - 1px), rgba(94,93,106,0.22) 1px), #FFFFFF",
+                    backgroundSize: `100% ${annotation.fontSize * annotation.lineHeight}px`,
+                    backgroundPosition: `0 ${10}px`,
                     fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                     fontSize: `${annotation.fontSize}px`,
                     lineHeight: `${annotation.fontSize * annotation.lineHeight}px`,
@@ -1788,7 +2283,9 @@ export default function EditorPage() {
                     overflowX: "auto",
                     overflowY: "hidden",
                     whiteSpace: "pre",
-                    boxShadow: "0 10px 24px rgba(0,0,0,0.10)",
+                    boxShadow: darkMode
+                      ? "0 14px 32px rgba(0,0,0,0.35), 0 0 0 4px rgba(246,234,242,0.08)"
+                      : "0 14px 30px rgba(37,50,74,0.12), 0 0 0 4px rgba(229,212,255,0.2)",
                   }}
                 />
               );
@@ -1799,6 +2296,7 @@ export default function EditorPage() {
                 key={annotation.id}
                 className="text-annotation-item"
                 onMouseDown={e => onTextPointerDown(annotation, e)}
+                onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "text", id: annotation.id }); }}
                 style={{
                   position: "absolute",
                   left: annotation.x,
@@ -1808,12 +2306,18 @@ export default function EditorPage() {
                   minHeight: `${Math.max(38, annotation.fontSize * annotation.lineHeight + 12)}px`,
                   padding: "4px 6px 6px",
                   borderRadius: "6px 6px 0 0",
-                  color: activeColor,
+                  color: annotation.color ?? activeColor,
                   fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                   fontSize: `${annotation.fontSize}px`,
                   lineHeight: `${annotation.fontSize * annotation.lineHeight}px`,
-                  whiteSpace: "pre-wrap",
-                  background: "transparent",
+                  whiteSpace: "pre",
+                  overflow: "visible",
+                  background: selectedObject?.kind === "text" && selectedObject.id === annotation.id
+                    ? (dm ? "rgba(229,212,255,0.12)" : "rgba(229,212,255,0.26)")
+                    : "transparent",
+                  boxShadow: selectedObject?.kind === "text" && selectedObject.id === annotation.id
+                    ? `0 0 0 1px ${dm ? "rgba(229,212,255,0.7)" : "#E5D4FF"}`
+                    : "none",
                   pointerEvents: "auto",
                   cursor: "text",
                   userSelect: "text",
@@ -1846,6 +2350,7 @@ export default function EditorPage() {
             <div
               key={picture.id}
               onMouseDown={e => dragPicture(picture.id, e)}
+              onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "picture", id: picture.id }); }}
               style={{
                 position: "absolute",
                 left: picture.x,
@@ -1855,6 +2360,10 @@ export default function EditorPage() {
                 zIndex: 17,
                 cursor: "grab",
                 pointerEvents: "auto",
+                outline: selectedObject?.kind === "picture" && selectedObject.id === picture.id
+                  ? `2px solid ${dm ? "#F9D5E5" : "#8E8D9B"}`
+                  : "none",
+                outlineOffset: "4px",
               }}
             >
               <img
@@ -1872,27 +2381,77 @@ export default function EditorPage() {
                 }}
               />
               <button
+                onMouseDown={e => e.stopPropagation()}
                 onClick={e => { e.stopPropagation(); removePicture(picture.id); }}
                 title="Remove picture"
                 style={{
                   position: "absolute",
-                  top: "-10px",
-                  right: "-10px",
-                  width: "24px",
-                  height: "24px",
+                  top: "-38px",
+                  right: "-8px",
+                  width: "30px",
+                  height: "30px",
                   borderRadius: "50%",
-                  border: `1px solid ${c.panelBorder}`,
-                  background: c.panelBg,
-                  color: c.docMuted,
+                  border: "2px solid #FFFFFF",
+                  background: "#EF4444",
+                  color: "#FFFFFF",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  boxShadow: "0 6px 16px rgba(0,0,0,0.16)",
+                  boxShadow: "0 10px 22px rgba(239,68,68,0.32)",
+                  zIndex: 4,
                 }}
               >
-                <X size={13} />
+                <X size={16} strokeWidth={2.8} />
               </button>
+              <button
+                data-handle="nw"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize top left"
+                style={resizeHandleStyle({ left: "-9px", top: "-9px" }, "nwse-resize")}
+              />
+              <button
+                data-handle="n"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize top"
+                style={resizeHandleStyle({ left: "50%", top: "-9px", transform: "translateX(-50%)" }, "ns-resize")}
+              />
+              <button
+                data-handle="ne"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize top right"
+                style={resizeHandleStyle({ right: "-9px", top: "-9px" }, "nesw-resize")}
+              />
+              <button
+                data-handle="w"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize left"
+                style={resizeHandleStyle({ left: "-9px", top: "50%", transform: "translateY(-50%)" }, "ew-resize")}
+              />
+              <button
+                data-handle="e"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize right"
+                style={resizeHandleStyle({ right: "-9px", top: "50%", transform: "translateY(-50%)" }, "ew-resize")}
+              />
+              <button
+                data-handle="sw"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize bottom left"
+                style={resizeHandleStyle({ left: "-9px", bottom: "-9px" }, "nesw-resize")}
+              />
+              <button
+                data-handle="s"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize bottom"
+                style={resizeHandleStyle({ left: "50%", bottom: "-9px", transform: "translateX(-50%)" }, "ns-resize")}
+              />
+              <button
+                data-handle="se"
+                onMouseDown={e => resizePicture(picture.id, e)}
+                title="Resize bottom right"
+                style={resizeHandleStyle({ right: "-9px", bottom: "-9px" }, "nwse-resize")}
+              />
             </div>
           ))}
 
@@ -1901,10 +2460,15 @@ export default function EditorPage() {
             <div
               key={note.id}
               onMouseDown={e => dragNote(note.id, e)}
+              onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "note", id: note.id }); }}
               style={{
                 position: "absolute",
                 left: note.x, top: note.y,
                 zIndex: 20, cursor: "grab",
+                outline: selectedObject?.kind === "note" && selectedObject.id === note.id
+                  ? `2px solid ${dm ? "#FFF3B0" : "#25324A"}`
+                  : "none",
+                outlineOffset: "6px",
               }}
             >
               <div style={{
@@ -2089,12 +2653,13 @@ export default function EditorPage() {
         {isPdfLoaded && (
           <div style={{
             position: "fixed",
-            right: "16px",
+            right: "18px",
             top: "96px",
             zIndex: 56,
             display: "flex",
             flexDirection: "column",
-            gap: "10px",
+            alignItems: "center",
+            gap: "8px",
             padding: "10px",
             borderRadius: "18px",
             border: `1px solid ${c.panelBorder}`,
@@ -2102,6 +2667,10 @@ export default function EditorPage() {
             boxShadow: "0 10px 30px rgba(142,141,155,0.18)",
           }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <button onClick={() => pictureInputRef.current?.click()} title="Add picture to document" style={pageDockBtnStyle(c)}>
+                <ImageIcon size={16} />
+              </button>
+              <div style={{ width: "100%", height: "1px", background: c.headerBorder, opacity: 0.7 }} />
               <button onClick={deleteCurrentPage} title="Delete page" style={pageDockBtnStyle(c)}>
                 <Trash2 size={16} />
               </button>
@@ -2114,9 +2683,6 @@ export default function EditorPage() {
               <button onClick={() => mergePdfInputRef.current?.click()} title="Merge PDF or picture at end" style={pageDockBtnStyle(c)}>
                 <Files size={16} />
               </button>
-            </div>
-            <div style={{ width: "100%", height: "1px", background: c.headerBorder, opacity: 0.7 }} />
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button onClick={() => setIncludePageNumbers(v => !v)} title="Toggle page numbers" style={pageDockBtnStyle(c, includePageNumbers)}>
                 <Hash size={16} />
               </button>
@@ -2126,6 +2692,34 @@ export default function EditorPage() {
               <button onClick={() => setDarkMode(d => !d)} title="Toggle dark mode" style={pageDockBtnStyle(c)}>
                 {dm ? <Sun size={16} /> : <Moon size={16} />}
               </button>
+            </div>
+          </div>
+        )}
+
+        {isPdfLoaded && showHelpPanel && (
+          <div style={{
+            position: "fixed",
+            right: "20px",
+            bottom: "96px",
+            zIndex: 59,
+            width: "280px",
+            borderRadius: "18px",
+            border: `1px solid ${c.panelBorder}`,
+            background: c.panelBg,
+            boxShadow: "0 14px 36px rgba(0,0,0,0.10)",
+            padding: "14px 16px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+              <strong style={{ fontSize: "13px" }}>Keyboard Help</strong>
+              <button onClick={() => setShowHelpPanel(false)} style={pageDockBtnStyle(c)}>×</button>
+            </div>
+            <div style={{ display: "grid", gap: "8px", fontSize: "12px", color: c.docMuted, lineHeight: 1.5 }}>
+              <div><strong>?</strong> Toggle this panel</div>
+              <div><strong>Delete</strong> Remove selected object</div>
+              <div><strong>Esc</strong> Clear selection</div>
+              <div><strong>Ctrl/Cmd+Z</strong> Undo, <strong>Shift</strong>+<strong>Ctrl/Cmd+Z</strong> Redo</div>
+              <div><strong>Ctrl/Cmd+O</strong> Open file</div>
+              <div><strong>Ctrl/Cmd++</strong> Zoom in, <strong>Ctrl/Cmd+-</strong> Zoom out</div>
             </div>
           </div>
         )}

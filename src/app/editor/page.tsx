@@ -43,8 +43,8 @@ interface PageState {
   imageData: ImageData;
   canvasWidth: number;
   canvasHeight: number;
-  undoStack: ImageData[];
-  redoStack: ImageData[];
+  undoStack: DocumentSnapshot[];
+  redoStack: DocumentSnapshot[];
   notes: NoteItem[];
   textAnnotations: TextAnnotationItem[];
   pictures: PictureItem[];
@@ -438,9 +438,9 @@ export default function EditorPage() {
 
   const captureSnapshot = useCallback((): DocumentSnapshot | null => {
     const canvas = annotCanvasRef.current;
-    if (!canvas || canvas.width === 0) return;
+    if (!canvas || canvas.width === 0) return null;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return null;
     return {
       imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
       canvasWidth: canvas.width,

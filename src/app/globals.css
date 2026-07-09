@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Excalifont';
+  src: url('/fonts/Excalifont-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Excalidraw';
+  src: url('/fonts/Excalifont-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@theme {
+  --color-lavender: #E5D4FF;
+  --color-mint: #CDEAC0;
+  --color-peach: #FFD8C2;
+  --color-sky-blue: #D6EFFF;
+  --color-blush: #F9D5E5;
+  --color-creamy-yellow: #FFF3B0;
+  --color-active-bg: #F4EEDF;
+  --color-charcoal: #1E1E24;
+  --color-charcoal-light: #5E5D6A;
+  --color-charcoal-muted: #8E8D9B;
+  
+  --bg-workspace: #FAF9F6;
+  --bg-panel: #FCFBF9;
+  --border-color: #EFEFEA;
+
+  --font-sans: var(--font-instrument), 'Instrument Sans', 'Geist', sans-serif;
+  --font-handwritten: 'Excalidraw', 'Excalifont', 'Quicksand', sans-serif;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body {
+  font-family: var(--font-instrument), 'Instrument Sans', 'Geist', sans-serif;
+  color: var(--color-charcoal);
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom CSS utilities for speech-notes, inputs, and text selection overlay */
+.speech-note {
+  background-color: #FDF5D6;
+  border: 1px solid rgba(43, 42, 53, 0.05);
+  box-shadow: 0 10px 25px -5px rgba(43, 42, 53, 0.08);
+  font-family: var(--font-handwritten);
+  font-size: 15px;
+  color: var(--color-charcoal);
+  z-index: 100;
+}
+
+.speech-note::before {
+  content: "";
+  position: absolute;
+  top: 24px;
+  left: -10px;
+  border-width: 6px 10px 6px 0;
+  border-style: solid;
+  border-color: transparent #FDF5D6 transparent transparent;
+  display: block;
+  width: 0;
+}
+
+.text-annotation-input {
+  position: absolute;
+  background: transparent;
+  border: 1px dashed var(--color-charcoal-muted);
+  outline: none;
+  font-family: var(--font-handwritten);
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  z-index: 90;
+  min-width: 120px;
+}
+
+.textLayer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1.0;
+  z-index: 3;
+  pointer-events: none;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.textLayer ::selection {
+  background: rgba(255, 243, 176, 0.45);
+}
+
+@keyframes motionFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motionHeroPan {
+  0% {
+    transform: scale(1.03) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.06) translate3d(-0.5%, -0.35%, 0);
+  }
+  100% {
+    transform: scale(1.03) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes motionPulseSoft {
+  0%, 100% {
+    box-shadow: 0 8px 22px rgba(142, 141, 155, 0.08);
+  }
+  50% {
+    box-shadow: 0 10px 26px rgba(142, 141, 155, 0.14);
+  }
+}
+
+.motion-fade-up {
+  animation: motionFadeUp 700ms ease-out both;
+}
+
+.motion-delay-1 {
+  animation-delay: 120ms;
+}
+
+.motion-delay-2 {
+  animation-delay: 220ms;
+}
+
+.motion-delay-3 {
+  animation-delay: 320ms;
+}
+
+.motion-delay-4 {
+  animation-delay: 420ms;
+}
+
+.motion-hero-pan {
+  animation: motionHeroPan 22s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.motion-pulse-soft {
+  animation: motionPulseSoft 4.5s ease-in-out infinite;
+}
+
+.motion-hover-lift {
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-fade-up,
+  .motion-hero-pan,
+  .motion-pulse-soft {
+    animation: none !important;
+  }
+}

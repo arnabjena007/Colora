@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 150" width="100%" height="100%">
+  <defs>
+    <!-- Import Google Font and define local Font Face -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&amp;display=swap');
+      
+      @font-face {
+        font-family: 'Geist';
+        src: url('assets/fonts/Geist-SemiBold.woff2') format('woff2');
+        font-weight: 600;
+        font-style: normal;
+      }
+
+      .logo-text {
+        font-family: 'Geist', 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-weight: 600;
+        font-size: 64px;
+        fill: #2B2A35;
+        letter-spacing: -1.5px;
+      }
+      .logo-tagline {
+        font-family: 'Geist', 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-weight: 500;
+        font-size: 13px;
+        fill: #7C7A90;
+        letter-spacing: 5px;
+        text-transform: uppercase;
+      }
+    </style>
+    
+    <!-- Pastel gradients -->
+    <linearGradient id="peachPinkGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFD8C2" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#F9D5E5" stop-opacity="0.75"/>
+    </linearGradient>
+
+    <linearGradient id="mintBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#CDEAC0"/>
+      <stop offset="100%" stop-color="#D6EFFF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background highlighter swipe -->
+  <!-- Swoops under and behind the wordmark -->
+  <path d="M 50,92 C 120,86 210,95 300,82 C 360,73 410,80 450,75" 
+        fill="none" 
+        stroke="url(#peachPinkGrad)" 
+        stroke-width="26" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" />
+
+  <!-- A second thin pastel accent line (mint green) simulating a sketch note annotation -->
+  <path d="M 65,108 C 150,105 240,107 330,102 C 370,100 400,101 425,98" 
+        fill="none" 
+        stroke="#CDEAC0" 
+        stroke-width="4" 
+        stroke-linecap="round"
+        opacity="0.85" />
+
+  <!-- The Wordmark "Pastelle" -->
+  <text x="60" y="86" class="logo-text">Pastelle</text>
+
+  <!-- Subtitle / Tagline -->
+  <text x="65" y="118" class="logo-tagline">PDF Annotation Toolkit</text>
+
+  <!-- Flowing loops and pen tip drawing at the end -->
+  <!-- A flowing sky blue line looping at the end of the text -->
+  <path d="M 315,48 C 322,40 338,25 342,38 C 345,55 344,82 344,82" 
+        fill="none" 
+        stroke="#E5D4FF" 
+        stroke-width="5" 
+        stroke-linecap="round"
+        opacity="0.9" />
+
+  <!-- Minimalist Pen tip drawing the accent line -->
+  <g transform="translate(425, 98) rotate(-35)">
+    <!-- Small elegant minimalist pen tip -->
+    <path d="M 0,0 L -7,-12 L 7,-12 Z" fill="#7C7A90" />
+    <path d="M 0,-12 L 0,-22" stroke="#7C7A90" stroke-width="1.5" />
+    <circle cx="0" cy="-4" r="1" fill="#FFF" />
+  </g>
+</svg>

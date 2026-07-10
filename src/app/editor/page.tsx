@@ -309,7 +309,7 @@ function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
 }
 
 export default function EditorPage() {
-  const [activeTool, setActiveTool] = useState("highlighter");
+  const [activeTool, setActiveTool] = useState("select");
   const [activeColor, setActiveColor] = useState(DEFAULT_HIGHLIGHT_COLOR);
   const [brushWidth, setBrushWidth] = useState(22);
   const [docTitle, setDocTitle] = useState("Untitled PDF");
@@ -357,7 +357,7 @@ export default function EditorPage() {
   const pageNumPendingRef = useRef<number | null>(null);
   const pdfjsLibRef = useRef<PdfJsLib | null>(null);
   const saveTimerRef = useRef<number | null>(null);
-  const activeToolRef = useRef("highlighter");
+  const activeToolRef = useRef("select");
   const activeColorRef = useRef(DEFAULT_HIGHLIGHT_COLOR);
   const brushWidthRef = useRef(22);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
@@ -415,8 +415,8 @@ export default function EditorPage() {
   }, []);
 
   const clearActiveTool = useCallback(() => {
-    setActiveTool("");
-    activeToolRef.current = "";
+    setActiveTool("select");
+    activeToolRef.current = "select";
     isDrawingRef.current = false;
     setSelectedObject(null);
     selectedObjectRef.current = null;
@@ -433,7 +433,7 @@ export default function EditorPage() {
       input.remove();
     });
     setEditingTextId(null);
-    toast("Tool cleared");
+    toast("Select active");
   }, [toast]);
 
   const captureSnapshot = useCallback((): DocumentSnapshot | null => {
@@ -616,13 +616,10 @@ export default function EditorPage() {
         : isShapeTool(tool) ? "crosshair"
         : tool === "text" || tool === "signature" ? "text"
         : "crosshair";
-    } else if (tool === "highlighter") {
+    } else if (tool === "highlighter" || tool === "select") {
       // Allow text selection through canvas
       canvas.style.pointerEvents = "none";
-      canvas.style.cursor = "text";
-    } else if (tool === "hand") {
-      canvas.style.pointerEvents = "none";
-      canvas.style.cursor = "grab";
+      canvas.style.cursor = tool === "select" ? "default" : "text";
     } else {
       canvas.style.pointerEvents = "auto";
     }
@@ -687,6 +684,30 @@ export default function EditorPage() {
         x: ev.clientX - cr.left - ox,
         y: ev.clientY - cr.top - oy
       } : n));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const dragText = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+    const annotation = textAnnotations.find(t => t.id === id);
+    if (!annotation) return;
+    const cr = container.getBoundingClientRect();
+    const ox = e.clientX - cr.left - annotation.x;
+    const oy = e.clientY - cr.top - annotation.y;
+    const onMove = (ev: MouseEvent) => {
+      setTextAnnotations(prev => prev.map(t => t.id === id ? {
+        ...t,
+        x: ev.clientX - cr.left - ox,
+        y: ev.clientY - cr.top - oy,
+      } : t));
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
@@ -826,14 +847,49 @@ export default function EditorPage() {
     ...position,
   });
 
+  const selectPictureAtPoint = (clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const hit = [...pictures].reverse().find(p =>
+      x >= p.x && x <= p.x + p.width && y >= p.y && y <= p.y + p.height
+    );
+    if (hit) {
+      setSelectedObject({ kind: "picture", id: hit.id });
+      selectedObjectRef.current = { kind: "picture", id: hit.id };
+    }
+  };
+
+  const hitInteractiveObjectAtPoint = (clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    if (!container) return false;
+    const rect = container.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const textHit = textAnnotationsRef.current.some(annotation =>
+      x >= annotation.x &&
+      x <= annotation.x + Math.max(24, annotation.fontSize * (annotation.text.length * 0.45 + 0.5)) &&
+      y >= annotation.y - 6 &&
+      y <= annotation.y + Math.max(38, annotation.fontSize * annotation.lineHeight + 12)
+    );
+    if (textHit) return true;
+    return picturesRef.current.some(picture =>
+      x >= picture.x &&
+      x <= picture.x + picture.width &&
+      y >= picture.y &&
+      y <= picture.y + picture.height
+    );
+  };
+
   // ─── CANVAS DRAWING ───────────────────────────────────────────────
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const tool = activeToolRef.current;
     if (!tool) return;
     if (tool === "text") { insertTextAt(e.clientX, e.clientY); return; }
     if (tool === "signature") { insertSignatureAt(e.clientX, e.clientY); return; }
-    if (tool === "highlighter") return; // handled by selection
-    if (tool === "hand") return;
+    if (tool === "highlighter" || tool === "select") return; // handled by selection
 
     const canvas = annotCanvasRef.current;
     if (!canvas) return;
@@ -847,7 +903,7 @@ export default function EditorPage() {
     lastXRef.current = x; lastYRef.current = y;
     shapeStartXRef.current = x; shapeStartYRef.current = y;
 
-    if (tool !== "hand") saveState();
+    saveState();
   };
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -921,6 +977,35 @@ export default function EditorPage() {
     setEditingTextId(null);
   };
 
+  const wrapTextLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+    const hardLines = text.split("\n");
+    const wrapped: string[] = [];
+
+    for (const hardLine of hardLines) {
+      if (!hardLine.trim()) {
+        wrapped.push("");
+        continue;
+      }
+
+      const words = hardLine.split(/\s+/);
+      let current = "";
+
+      for (const word of words) {
+        const next = current ? `${current} ${word}` : word;
+        if (ctx.measureText(next).width <= maxWidth || !current) {
+          current = next;
+        } else {
+          wrapped.push(current);
+          current = word;
+        }
+      }
+
+      if (current) wrapped.push(current);
+    }
+
+    return wrapped;
+  };
+
   const insertTextAt = (clientX: number, clientY: number) => {
     const canvas = annotCanvasRef.current;
     const container = containerRef.current;
@@ -978,6 +1063,20 @@ export default function EditorPage() {
 
   const onTextPointerDown = (annotation: TextAnnotationItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    const isSelected = selectedObjectRef.current?.kind === "text" && selectedObjectRef.current.id === annotation.id;
+    if (!isSelected || activeToolRef.current !== "select") {
+      setSelectedObject({ kind: "text", id: annotation.id });
+      selectedObjectRef.current = { kind: "text", id: annotation.id };
+      return;
+    }
+    dragText(annotation.id, e);
+  };
+
+  const onTextDoubleClick = (annotation: TextAnnotationItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (activeToolRef.current !== "select") return;
+    setSelectedObject({ kind: "text", id: annotation.id });
+    selectedObjectRef.current = { kind: "text", id: annotation.id };
     setTextFontSize(annotation.fontSize);
     setTextLineHeight(annotation.lineHeight);
     setActiveColor(annotation.color);
@@ -1369,7 +1468,8 @@ export default function EditorPage() {
       ctx.fillStyle = annotation.color ?? TEXT_COLOR;
       ctx.font = `${annotation.fontSize * scaleY}px 'Excalifont', 'Instrument Sans', Arial, sans-serif`;
       ctx.textBaseline = "top";
-      const lines = annotation.text.split("\n");
+      const maxWidth = Math.max(80, (pageState.canvasWidth - annotation.x - 24) * scaleX);
+      const lines = wrapTextLines(ctx, annotation.text, maxWidth);
       lines.forEach((line, index) => {
         ctx.fillText(
           line,
@@ -1482,7 +1582,7 @@ export default function EditorPage() {
         const source = pagesRef.current[i];
         const page = await source.doc.getPage(source.pageNumber);
         const baseVp = page.getViewport({ scale: 1 });
-        const scale = Math.min(2, Math.max(1, 1500 / baseVp.width));
+        const scale = Math.min(3, Math.max(1.5, 2200 / baseVp.width));
         const vp = page.getViewport({ scale });
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(vp.width);
@@ -1508,7 +1608,7 @@ export default function EditorPage() {
         exportedPages.push({
           width: canvas.width,
           height: canvas.height,
-          image: dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)),
+          image: dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.98)),
         });
       }
 
@@ -1597,7 +1697,7 @@ export default function EditorPage() {
 
       const toolShortcuts: Record<string, string> = {
         h: "highlighter",
-        v: "hand",
+        v: "select",
         p: "pencil",
         d: "pencil",
         t: "text",
@@ -1812,10 +1912,10 @@ export default function EditorPage() {
   );
 
   const pageDockBtnStyle = (theme: typeof c, active = false): React.CSSProperties => ({
-    width: "36px",
-    height: "36px",
+    width: "34px",
+    height: "34px",
     border: `1px solid ${active ? "#E5D4FF" : theme.headerBorder}`,
-    borderRadius: "10px",
+    borderRadius: "9px",
     background: active ? theme.toolActive : "transparent",
     cursor: "pointer",
     display: "flex",
@@ -1824,6 +1924,8 @@ export default function EditorPage() {
     color: active ? theme.toolActiveTxt : theme.docMuted,
     transition: "all 0.15s",
   });
+
+  const pictureControlsEnabled = activeTool === "select" || !activeTool || activeTool === "highlighter";
 
   return (
     <div style={{
@@ -2004,7 +2106,7 @@ export default function EditorPage() {
         </div>
 
         {/* Right actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ display: isPdfLoaded ? "flex" : "none", alignItems: "center", gap: "8px" }}>
           <span style={{ fontSize: "11px", fontWeight: 800, color: c.docMuted, minWidth: "110px", textAlign: "right" }}>
             {isSaving ? "Saving..." : lastSavedLabel}
           </span>
@@ -2075,7 +2177,7 @@ export default function EditorPage() {
           <span style={{ fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", color: c.docMuted, textTransform: "uppercase", marginBottom: "4px" }}>Tools</span>
 
           {toolBtn("highlighter", <Highlighter size={20} />, "Highlight")}
-          {toolBtn("hand",        <Hand size={20} />,        "Hand")}
+          {toolBtn("select",      <Hand size={20} />,        "Select")}
           {toolBtn("pencil",      <Pencil size={20} />,      "Draw")}
           {toolBtn("text",        <Type size={20} />,        "Text")}
           {toolBtn("signature",   <PenLine size={20} />,     "Sign")}
@@ -2141,13 +2243,19 @@ export default function EditorPage() {
         minWidth: 0, minHeight: 0,
         padding: isPdfLoaded ? "32px 40px 80px 40px" : "0",
         transition: "background 0.2s",
-      }}>
+      }} className="hide-scrollbar">
 
         {/* ── DOCUMENT PAPER ── */}
         <div
           ref={containerRef}
-          onMouseDownCapture={onDocumentMouseDownCapture}
-          onClick={() => {
+          onMouseDownCapture={e => {
+            selectPictureAtPoint(e.clientX, e.clientY);
+            onDocumentMouseDownCapture(e);
+          }}
+          onClick={e => {
+            const target = e.target as HTMLElement;
+            if (target.closest(".text-annotation-item, [data-picture-hitbox], [data-picture-resize], input, textarea, button, [contenteditable='true']")) return;
+            if (hitInteractiveObjectAtPoint(e.clientX, e.clientY)) return;
             setSelectedObject(null);
             selectedObjectRef.current = null;
           }}
@@ -2304,12 +2412,14 @@ export default function EditorPage() {
                 className="text-annotation-item"
                 onMouseDown={e => onTextPointerDown(annotation, e)}
                 onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "text", id: annotation.id }); }}
+                onDoubleClick={e => onTextDoubleClick(annotation, e)}
                 style={{
                   position: "absolute",
                   left: annotation.x,
                   top: annotation.y,
                   zIndex: 19,
-                  minWidth: "24px",
+                  width: "auto",
+                  maxWidth: `calc(100% - ${Math.max(180, annotation.x + 28)}px)`,
                   minHeight: `${Math.max(38, annotation.fontSize * annotation.lineHeight + 12)}px`,
                   padding: "4px 6px 6px",
                   borderRadius: "6px 6px 0 0",
@@ -2317,8 +2427,9 @@ export default function EditorPage() {
                   fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                   fontSize: `${annotation.fontSize}px`,
                   lineHeight: `${annotation.fontSize * annotation.lineHeight}px`,
-                  whiteSpace: "pre",
-                  overflow: "visible",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
                   background: selectedObject?.kind === "text" && selectedObject.id === annotation.id
                     ? (dm ? "rgba(229,212,255,0.12)" : "rgba(229,212,255,0.26)")
                     : "transparent",
@@ -2326,7 +2437,7 @@ export default function EditorPage() {
                     ? `0 0 0 1px ${dm ? "rgba(229,212,255,0.7)" : "#E5D4FF"}`
                     : "none",
                   pointerEvents: "auto",
-                  cursor: "text",
+                  cursor: activeTool === "select" ? "move" : "text",
                   userSelect: "text",
                 }}
               >
@@ -2353,113 +2464,137 @@ export default function EditorPage() {
             </div>
           )}
 
-          {pictures.map(picture => (
-            <div
-              key={picture.id}
-              onMouseDown={e => dragPicture(picture.id, e)}
-              onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "picture", id: picture.id }); }}
-              style={{
-                position: "absolute",
-                left: picture.x,
-                top: picture.y,
-                width: picture.width,
-                height: picture.height,
-                zIndex: 17,
-                cursor: "grab",
-                pointerEvents: "auto",
-                outline: selectedObject?.kind === "picture" && selectedObject.id === picture.id
-                  ? `2px solid ${dm ? "#F9D5E5" : "#8E8D9B"}`
-                  : "none",
-                outlineOffset: "4px",
-              }}
-            >
-              <img
-                src={picture.src}
-                alt={picture.name}
-                draggable={false}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "contain",
-                  display: "block",
-                  borderRadius: "6px",
-                  boxShadow: "0 10px 24px rgba(37,50,74,0.14)",
-                  userSelect: "none",
-                }}
-              />
-              <button
-                onMouseDown={e => e.stopPropagation()}
-                onClick={e => { e.stopPropagation(); removePicture(picture.id); }}
-                title="Remove picture"
+          {isPdfLoaded && pictures.map(picture => (
+            <React.Fragment key={picture.id}>
+              <div
+                data-picture-hitbox
+                onMouseDown={pictureControlsEnabled ? (e => {
+                  e.stopPropagation();
+                  const isSelected = selectedObjectRef.current?.kind === "picture" && selectedObjectRef.current.id === picture.id;
+                  if (!isSelected || activeToolRef.current !== "select") {
+                    setSelectedObject({ kind: "picture", id: picture.id });
+                    selectedObjectRef.current = { kind: "picture", id: picture.id };
+                    return;
+                  }
+                  dragPicture(picture.id, e);
+                }) : undefined}
                 style={{
                   position: "absolute",
-                  top: "-38px",
-                  right: "-8px",
-                  width: "30px",
-                  height: "30px",
-                  borderRadius: "50%",
-                  border: "2px solid #FFFFFF",
-                  background: "#EF4444",
-                  color: "#FFFFFF",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  boxShadow: "0 10px 22px rgba(239,68,68,0.32)",
-                  zIndex: 4,
+                  left: picture.x,
+                  top: picture.y,
+                  width: picture.width,
+                  height: picture.height,
+                  zIndex: selectedObject?.kind === "picture" && selectedObject.id === picture.id ? 17 : 3,
+                  cursor: pictureControlsEnabled ? "grab" : "default",
+                  pointerEvents: "auto",
                 }}
               >
-                <X size={16} strokeWidth={2.8} />
-              </button>
-              <button
-                data-handle="nw"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize top left"
-                style={resizeHandleStyle({ left: "-9px", top: "-9px" }, "nwse-resize")}
-              />
-              <button
-                data-handle="n"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize top"
-                style={resizeHandleStyle({ left: "50%", top: "-9px", transform: "translateX(-50%)" }, "ns-resize")}
-              />
-              <button
-                data-handle="ne"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize top right"
-                style={resizeHandleStyle({ right: "-9px", top: "-9px" }, "nesw-resize")}
-              />
-              <button
-                data-handle="w"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize left"
-                style={resizeHandleStyle({ left: "-9px", top: "50%", transform: "translateY(-50%)" }, "ew-resize")}
-              />
-              <button
-                data-handle="e"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize right"
-                style={resizeHandleStyle({ right: "-9px", top: "50%", transform: "translateY(-50%)" }, "ew-resize")}
-              />
-              <button
-                data-handle="sw"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize bottom left"
-                style={resizeHandleStyle({ left: "-9px", bottom: "-9px" }, "nesw-resize")}
-              />
-              <button
-                data-handle="s"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize bottom"
-                style={resizeHandleStyle({ left: "50%", bottom: "-9px", transform: "translateX(-50%)" }, "ns-resize")}
-              />
-              <button
-                data-handle="se"
-                onMouseDown={e => resizePicture(picture.id, e)}
-                title="Resize bottom right"
-                style={resizeHandleStyle({ right: "-9px", bottom: "-9px" }, "nwse-resize")}
-              />
-            </div>
+                <img
+                  src={picture.src}
+                  alt={picture.name}
+                  draggable={false}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                    display: "block",
+                    borderRadius: "6px",
+                    boxShadow: "0 10px 24px rgba(37,50,74,0.14)",
+                    userSelect: "none",
+                  }}
+                />
+              </div>
+              {selectedObject?.kind === "picture" && selectedObject.id === picture.id && (
+                <div
+                  data-picture-resize
+                  style={{
+                    position: "absolute",
+                    left: picture.x,
+                    top: picture.y,
+                    width: picture.width,
+                    height: picture.height,
+                    zIndex: 18,
+                    pointerEvents: "none",
+                    outline: `2px solid ${dm ? "#F9D5E5" : "#8E8D9B"}`,
+                    outlineOffset: "4px",
+                  }}
+                >
+                  <button
+                    onMouseDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); removePicture(picture.id); }}
+                    title="Remove picture"
+                    style={{
+                      position: "absolute",
+                      top: "-38px",
+                      right: "-8px",
+                      width: "30px",
+                      height: "30px",
+                      borderRadius: "50%",
+                      border: "2px solid #FFFFFF",
+                      background: "#EF4444",
+                      color: "#FFFFFF",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      boxShadow: "0 10px 22px rgba(239,68,68,0.32)",
+                      zIndex: 4,
+                      pointerEvents: "auto",
+                    }}
+                  >
+                    <X size={16} strokeWidth={2.8} />
+                  </button>
+                  <button
+                    data-handle="nw"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize top left"
+                    style={{ ...resizeHandleStyle({ left: "-9px", top: "-9px" }, "nwse-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="n"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize top"
+                    style={{ ...resizeHandleStyle({ left: "50%", top: "-9px", transform: "translateX(-50%)" }, "ns-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="ne"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize top right"
+                    style={{ ...resizeHandleStyle({ right: "-9px", top: "-9px" }, "nesw-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="w"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize left"
+                    style={{ ...resizeHandleStyle({ left: "-9px", top: "50%", transform: "translateY(-50%)" }, "ew-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="e"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize right"
+                    style={{ ...resizeHandleStyle({ right: "-9px", top: "50%", transform: "translateY(-50%)" }, "ew-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="sw"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize bottom left"
+                    style={{ ...resizeHandleStyle({ left: "-9px", bottom: "-9px" }, "nesw-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="s"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize bottom"
+                    style={{ ...resizeHandleStyle({ left: "50%", bottom: "-9px", transform: "translateX(-50%)" }, "ns-resize"), pointerEvents: "auto" }}
+                  />
+                  <button
+                    data-handle="se"
+                    onMouseDown={e => resizePicture(picture.id, e)}
+                    title="Resize bottom right"
+                    style={{ ...resizeHandleStyle({ right: "-9px", bottom: "-9px" }, "nwse-resize"), pointerEvents: "auto" }}
+                  />
+                </div>
+              )}
+            </React.Fragment>
           ))}
 
           {/* Draggable speech notes */}
@@ -2554,48 +2689,38 @@ export default function EditorPage() {
                   <FolderOpen size={28} />
                 </div>
                 <h1 style={{ fontSize: "28px", fontWeight: 850, margin: "0 0 10px", color: "#4E4D5B" }}>
-                  Open a PDF or picture to start
+                  Start your first page
                 </h1>
                 <p style={{ fontSize: "14px", lineHeight: "1.7", color: c.docMuted, margin: "0 auto 26px", maxWidth: "360px" }}>
-                  Choose a PDF or image from your computer, local drive, or synced Drive folder.
+                  Open a PDF or image to begin, then add notes, drawings, shapes, and pictures on top.
                 </p>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", flexWrap: "wrap" }}>
-                  <button
-                    onClick={startBlankPage}
-                    style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                      padding: "12px 20px", borderRadius: "999px",
-                      background: "#25324A", color: "#FFFFFF",
-                      border: "none", cursor: "pointer",
-                      fontWeight: 850, fontSize: "13px", fontFamily: "inherit",
-                    }}
-                  >
-                    Blank page
-                  </button>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px" }}>
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     style={{
                       display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                      padding: "12px 20px", borderRadius: "999px",
-                      background: "#E5D4FF", color: "#4E4D5B",
+                      padding: "14px 24px", borderRadius: "999px",
+                      background: "#25324A", color: "#FFFFFF",
                       border: "none", cursor: "pointer",
-                      fontWeight: 850, fontSize: "13px", fontFamily: "inherit",
+                      fontWeight: 850, fontSize: "14px", fontFamily: "inherit",
+                      minWidth: "220px",
                     }}
                   >
                     <FolderOpen size={16} />
-                    Open from Drive
+                    Get started
                   </button>
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={startBlankPage}
                     style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                      padding: "12px 20px", borderRadius: "999px",
-                      background: "#FFFFFF", color: "#5E5D6A",
-                      border: `1px solid ${c.panelBorder}`, cursor: "pointer",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      background: "transparent", color: "#5E5D6A",
+                      border: "none", cursor: "pointer",
                       fontWeight: 800, fontSize: "13px", fontFamily: "inherit",
+                      textDecoration: "underline",
+                      textUnderlineOffset: "4px",
                     }}
                   >
-                    Browse files
+                    Start with a blank page
                   </button>
                 </div>
               </div>
@@ -2657,52 +2782,6 @@ export default function EditorPage() {
           </div>
         )}
 
-        {isPdfLoaded && (
-          <div style={{
-            position: "fixed",
-            right: "18px",
-            top: "96px",
-            zIndex: 56,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "8px",
-            padding: "10px",
-            borderRadius: "18px",
-            border: `1px solid ${c.panelBorder}`,
-            background: c.panelBg,
-            boxShadow: "0 10px 30px rgba(142,141,155,0.18)",
-          }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <button onClick={() => pictureInputRef.current?.click()} title="Add picture to document" style={pageDockBtnStyle(c)}>
-                <ImageIcon size={16} />
-              </button>
-              <div style={{ width: "100%", height: "1px", background: c.headerBorder, opacity: 0.7 }} />
-              <button onClick={deleteCurrentPage} title="Delete page" style={pageDockBtnStyle(c)}>
-                <Trash2 size={16} />
-              </button>
-              <button onClick={addBlankPage} title="Add blank page" style={pageDockBtnStyle(c)}>
-                <Plus size={17} />
-              </button>
-              <button onClick={() => insertPdfInputRef.current?.click()} title="Insert PDF or picture after current page" style={pageDockBtnStyle(c)}>
-                <FilePlus2 size={16} />
-              </button>
-              <button onClick={() => mergePdfInputRef.current?.click()} title="Merge PDF or picture at end" style={pageDockBtnStyle(c)}>
-                <Files size={16} />
-              </button>
-              <button onClick={() => setIncludePageNumbers(v => !v)} title="Toggle page numbers" style={pageDockBtnStyle(c, includePageNumbers)}>
-                <Hash size={16} />
-              </button>
-              <button onClick={exportPDF} title="Export PDF" style={pageDockBtnStyle(c)}>
-                <Download size={16} />
-              </button>
-              <button onClick={() => setDarkMode(d => !d)} title="Toggle dark mode" style={pageDockBtnStyle(c)}>
-                {dm ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-            </div>
-          </div>
-        )}
-
         {isPdfLoaded && showHelpPanel && (
           <div style={{
             position: "fixed",
@@ -2731,6 +2810,66 @@ export default function EditorPage() {
           </div>
         )}
       </main>
+
+      {isPdfLoaded && (
+        <aside
+          className="hide-scrollbar"
+          style={{
+            position: "fixed",
+            right: "0",
+            top: "64px",
+            bottom: "0",
+            width: "68px",
+            zIndex: 56,
+            background: c.sidebarBg,
+            borderLeft: `1px solid ${c.sidebarBorder}`,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            padding: "10px 6px",
+            overflowY: "auto",
+          }}
+        >
+          <div style={{
+            width: "100%",
+            minHeight: "100%",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            paddingTop: "4px",
+            paddingBottom: "8px",
+            alignItems: "center",
+          }}>
+            <button onClick={exportPDF} title="Export PDF" style={pageDockBtnStyle(c)}>
+              <Download size={16} />
+            </button>
+            <div style={{ width: "100%", height: "1px", background: c.headerBorder, opacity: 0.7 }} />
+            <button onClick={() => pictureInputRef.current?.click()} title="Add picture to document" style={pageDockBtnStyle(c)}>
+              <ImageIcon size={16} />
+            </button>
+            <button onClick={addBlankPage} title="Add blank page" style={pageDockBtnStyle(c)}>
+              <Plus size={17} />
+            </button>
+            <button onClick={() => insertPdfInputRef.current?.click()} title="Insert PDF or picture after current page" style={pageDockBtnStyle(c)}>
+              <FilePlus2 size={16} />
+            </button>
+            <button onClick={() => mergePdfInputRef.current?.click()} title="Merge PDF or picture at end" style={pageDockBtnStyle(c)}>
+              <Files size={16} />
+            </button>
+            <button onClick={() => setIncludePageNumbers(v => !v)} title="Toggle page numbers" style={pageDockBtnStyle(c, includePageNumbers)}>
+              <Hash size={16} />
+            </button>
+            <div style={{ width: "100%", height: "1px", background: c.headerBorder, opacity: 0.7 }} />
+            <button onClick={deleteCurrentPage} title="Delete page" style={pageDockBtnStyle(c)}>
+              <Trash2 size={16} />
+            </button>
+            <button onClick={() => setDarkMode(d => !d)} title="Toggle dark mode" style={pageDockBtnStyle(c)}>
+              {dm ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+          </div>
+        </aside>
+      )}
 
       {/* ── TOAST ── */}
       <div style={{

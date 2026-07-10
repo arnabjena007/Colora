@@ -67,6 +67,15 @@ body {
   padding: 0;
 }
 
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Custom CSS utilities for speech-notes, inputs, and text selection overlay */
 .speech-note {
   background-color: #FDF5D6;

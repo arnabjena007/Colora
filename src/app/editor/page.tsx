@@ -9,8 +9,8 @@ import {
   Download, Undo2, Redo2, FolderOpen, X,
   ChevronLeft, ChevronRight, Sun, Moon, Home, Eraser,
   ZoomIn, ZoomOut, Trash2, FilePlus2, Files, Hash, PenLine,
-  Hand, ArrowRight, Minus, Circle, Diamond, Plus, ImageIcon,
-  AlignLeft, AlignCenter, AlignRight
+  Hand, ArrowRight, Minus, Circle, Diamond, ImageIcon, CircleHelp,
+  AlignLeft, AlignCenter, AlignRight, Bold, Italic, Underline
 } from "lucide-react";
 
 interface NoteItem {
@@ -29,6 +29,9 @@ interface TextAnnotationItem {
   lineHeight: number;
   color: string;
   align?: "left" | "center" | "right";
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
 }
 
 interface PictureItem {
@@ -139,11 +142,14 @@ const TEXT_PALETTE = [
 const INK_COLOR = "#8E8D9B";
 const TEXT_COLOR = "#25324A";
 const DEFAULT_HIGHLIGHT_COLOR = HIGHLIGHT_PALETTE[0].hex;
+const NO_FILL = "transparent";
+const SHAPE_FILL_ALPHA = 0.38;
 const BLANK_PAGE_WIDTH = 800;
 const BLANK_PAGE_HEIGHT = 1060;
 const SUPPORTED_FILE_TYPES = "application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp";
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
+type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
 type SelectedObject =
   | { kind: "text"; id: string }
   | { kind: "note"; id: string }
@@ -174,6 +180,18 @@ const roughSeed = (...values: number[]) => {
   return Math.max(1, Math.abs(raw) % 2147483647);
 };
 
+const toShapeFill = (hex: string, alpha: number) => {
+  if (!hex || hex === NO_FILL) return undefined;
+  const safe = hex.replace("#", "");
+  const normalized = safe.length === 3 ? safe.split("").map(ch => ch + ch).join("") : safe;
+  const value = Number.parseInt(normalized, 16);
+  if (Number.isNaN(value) || normalized.length !== 6) return hex;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 function drawRoughShape(
   ctx: CanvasRenderingContext2D,
   tool: ShapeTool,
@@ -182,6 +200,8 @@ function drawRoughShape(
   cx: number,
   cy: number,
   color: string,
+  fillColor: string,
+  fillStyle: ShapeFillStyle,
 ) {
   const w = cx - x;
   const h = cy - y;
@@ -197,13 +217,17 @@ function drawRoughShape(
   const options: RoughOptions = {
     seed,
     stroke: color,
+    fill: toShapeFill(fillColor, SHAPE_FILL_ALPHA),
     strokeWidth: 1.7,
+    fillWeight: 1.6,
     roughness: 0.92,
     bowing: 0.42,
+    hachureAngle: -41,
+    hachureGap: 10,
     maxRandomnessOffset: Math.max(1.6, Math.min(2.8, shapeSize / 260)),
     curveFitting: 0.9,
     curveStepCount: 11,
-    fillStyle: "solid",
+    fillStyle,
     disableMultiStroke: false,
     preserveVertices: true,
   };
@@ -243,6 +267,141 @@ function drawRoughShape(
   }
 
   ctx.restore();
+}
+
+type TextDropdownProps<T extends string | number> = {
+  value: T;
+  width: string;
+  label: string;
+  options: T[];
+  onChange: (next: T) => void;
+  formatOption?: (option: T) => string;
+  theme: {
+    headerBorder: string;
+    panelBg: string;
+    toolActive: string;
+    toolActiveTxt: string;
+    docText: string;
+  };
+  darkMode: boolean;
+};
+
+function TextDropdown<T extends string | number>({
+  value,
+  width,
+  label,
+  options,
+  onChange,
+  formatOption,
+  theme,
+  darkMode,
+}: TextDropdownProps<T>) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const updateAnchor = () => {
+      const rect = ref.current?.getBoundingClientRect();
+      if (!rect) return;
+      setAnchor({ top: rect.bottom + 6, left: rect.left });
+    };
+    updateAnchor();
+    const onDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onResize = () => updateAnchor();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", updateAnchor, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", updateAnchor, true);
+    };
+  }, [open]);
+
+  const buttonStyle: React.CSSProperties = {
+    width,
+    height: "30px",
+    borderRadius: "10px",
+    border: `1px solid ${theme.headerBorder}`,
+    color: theme.docText,
+    fontFamily: "inherit",
+    fontSize: "11px",
+    fontWeight: 800,
+    padding: "0 8px 0 10px",
+    outline: "none",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    textAlign: "left",
+    background: open ? (darkMode ? "#232A39" : "#F3ECFF") : (darkMode ? "#171B24" : "#FFFFFF"),
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        title={label}
+        style={buttonStyle}
+      >
+        <span style={{ flex: 1 }}>{formatOption ? formatOption(value) : String(value)}</span>
+        <ChevronRight size={12} style={{ transform: "rotate(90deg)", opacity: 0.8 }} />
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "fixed",
+            top: anchor.top,
+            left: anchor.left,
+            zIndex: 80,
+            minWidth: width,
+            borderRadius: "14px",
+            border: `1px solid ${theme.headerBorder}`,
+            background: theme.panelBg,
+            boxShadow: "0 14px 28px rgba(0,0,0,0.14)",
+            padding: "6px",
+            maxHeight: "240px",
+            overflowY: "auto",
+          }}
+        >
+          {options.map(option => {
+            const selected = option === value;
+            return (
+              <button
+                key={String(option)}
+                type="button"
+                onClick={() => {
+                  onChange(option);
+                  setOpen(false);
+                }}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  background: selected ? theme.toolActive : "transparent",
+                  color: selected ? theme.toolActiveTxt : theme.docText,
+                  borderRadius: "10px",
+                  padding: "8px 10px",
+                  textAlign: "left",
+                  fontFamily: "inherit",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                {formatOption ? formatOption(option) : String(option)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function createBlankPdfDocument(): PdfDocument {
@@ -331,6 +490,11 @@ export default function EditorPage() {
   const [signatureText, setSignatureText] = useState("");
   const [textFontSize, setTextFontSize] = useState(18);
   const [textLineHeight, setTextLineHeight] = useState(1.35);
+  const [textBold, setTextBold] = useState(false);
+  const [textItalic, setTextItalic] = useState(false);
+  const [textUnderline, setTextUnderline] = useState(false);
+  const [shapeFillColor, setShapeFillColor] = useState<string>(NO_FILL);
+  const [shapeFillStyle, setShapeFillStyle] = useState<ShapeFillStyle>("hachure");
   const [showBrushWidthMenu, setShowBrushWidthMenu] = useState(false);
   const [showTextSizeMenu, setShowTextSizeMenu] = useState(false);
   const [showTextSpaceMenu, setShowTextSpaceMenu] = useState(false);
@@ -338,6 +502,8 @@ export default function EditorPage() {
   const [showShapeMenu, setShowShapeMenu] = useState(false);
   const [selectedObject, setSelectedObject] = useState<SelectedObject | null>(null);
   const [showHelpPanel, setShowHelpPanel] = useState(false);
+  const [showToolTips, setShowToolTips] = useState(false);
+  const [toolTipText, setToolTipText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
 
@@ -366,11 +532,17 @@ export default function EditorPage() {
   const activeColorRef = useRef(DEFAULT_HIGHLIGHT_COLOR);
   const brushWidthRef = useRef(22);
   const textAlignRef = useRef<"left" | "center" | "right">("left");
+  const textBoldRef = useRef(false);
+  const textItalicRef = useRef(false);
+  const textUnderlineRef = useRef(false);
+  const shapeFillColorRef = useRef(NO_FILL);
+  const shapeFillStyleRef = useRef<ShapeFillStyle>("hachure");
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const textLayerInstanceRef = useRef<PdfTextLayer | null>(null);
   const pageStoreRef = useRef<Map<number, PageState>>(new Map());
   const pagesRef = useRef<PdfPageSource[]>([]);
   const renderPageRef = useRef<(num: number) => void>(() => {});
+  const helpHideTimerRef = useRef<number | null>(null);
   const pageNumRef = useRef(1);
   const notesRef = useRef<NoteItem[]>([]);
   const textAnnotationsRef = useRef<TextAnnotationItem[]>([]);
@@ -402,6 +574,11 @@ export default function EditorPage() {
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { activeColorRef.current = activeColor; }, [activeColor]);
   useEffect(() => { brushWidthRef.current = brushWidth; }, [brushWidth]);
+  useEffect(() => { textBoldRef.current = textBold; }, [textBold]);
+  useEffect(() => { textItalicRef.current = textItalic; }, [textItalic]);
+  useEffect(() => { textUnderlineRef.current = textUnderline; }, [textUnderline]);
+  useEffect(() => { shapeFillColorRef.current = shapeFillColor; }, [shapeFillColor]);
+  useEffect(() => { shapeFillStyleRef.current = shapeFillStyle; }, [shapeFillStyle]);
   useEffect(() => { notesRef.current = notes; }, [notes]);
   useEffect(() => { textAnnotationsRef.current = textAnnotations; }, [textAnnotations]);
   useEffect(() => { picturesRef.current = pictures; }, [pictures]);
@@ -418,6 +595,17 @@ export default function EditorPage() {
     setToastMsg(msg);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 2000);
+  }, []);
+
+  const flashToolTips = useCallback((msg: string) => {
+    if (helpHideTimerRef.current) window.clearTimeout(helpHideTimerRef.current);
+    setToolTipText(msg);
+    setShowToolTips(true);
+    helpHideTimerRef.current = window.setTimeout(() => {
+      setShowToolTips(false);
+      setToolTipText("");
+      helpHideTimerRef.current = null;
+    }, 2800);
   }, []);
 
   const clearActiveTool = useCallback(() => {
@@ -609,6 +797,7 @@ export default function EditorPage() {
   const selectTool = (tool: string) => {
     setActiveTool(tool);
     activeToolRef.current = tool;
+    setShowShapeMenu(false);
     setEditingTextId(null);
     setSelectedObject(null);
     selectedObjectRef.current = null;
@@ -636,7 +825,21 @@ export default function EditorPage() {
     if (isShapeTool(tool)) { setActiveColor(INK_COLOR); activeColorRef.current = INK_COLOR; setBrushWidth(2); }
     if (tool === "text" || tool === "signature") { setActiveColor(TEXT_COLOR); activeColorRef.current = TEXT_COLOR; }
     if (tool === "eraser") { setActiveColor("#FFFFFF"); activeColorRef.current = "#FFFFFF"; setBrushWidth(20); }
-    toast(`${tool.charAt(0).toUpperCase() + tool.slice(1)} active`);
+    const toolMessages: Record<string, string> = {
+      select: "Select mode ready. Use ? for hotkeys.",
+      highlighter: "Highlight mode ready. Use ? for hotkeys.",
+      pencil: "Draw mode ready. Use ? for hotkeys.",
+      rect: "Rectangle tool ready. Use ? for hotkeys.",
+      ellipse: "Ellipse tool ready. Use ? for hotkeys.",
+      diamond: "Diamond tool ready. Use ? for hotkeys.",
+      line: "Line tool ready. Use ? for hotkeys.",
+      arrow: "Arrow tool ready. Use ? for hotkeys.",
+      text: "Text tool ready. Use ? for hotkeys.",
+      signature: "Signature tool ready. Use ? for hotkeys.",
+      eraser: "Eraser ready. Use ? for hotkeys.",
+      "note-btn": "Note added. Use ? for hotkeys.",
+    };
+    flashToolTips(toolMessages[tool] ?? "Tool selected. Use ? for hotkeys.");
   };
 
   // ─── UNDO / REDO ──────────────────────────────────────────────────
@@ -959,7 +1162,7 @@ export default function EditorPage() {
       }
       const x = shapeStartXRef.current;
       const y = shapeStartYRef.current;
-      drawRoughShape(ctx, tool, x, y, cx, cy, color);
+      drawRoughShape(ctx, tool, x, y, cx, cy, color, shapeFillColorRef.current, shapeFillStyleRef.current);
     }
 
     lastXRef.current = cx; lastYRef.current = cy;
@@ -1031,6 +1234,9 @@ export default function EditorPage() {
       lineHeight: textLineHeight,
       color: activeColorRef.current,
       align: textAlignRef.current,
+      bold: textBoldRef.current,
+      italic: textItalicRef.current,
+      underline: textUnderlineRef.current,
     }]);
     setEditingTextId(id);
     saveState();
@@ -1089,6 +1295,9 @@ export default function EditorPage() {
     setActiveColor(annotation.color);
     activeColorRef.current = annotation.color;
     textAlignRef.current = annotation.align ?? "left";
+    setTextBold(Boolean(annotation.bold));
+    setTextItalic(Boolean(annotation.italic));
+    setTextUnderline(Boolean(annotation.underline));
     setEditingTextId(annotation.id);
   };
 
@@ -1097,6 +1306,25 @@ export default function EditorPage() {
     const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (targetId) {
       setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, align } : t));
+    }
+  };
+
+  const setTextStyle = (key: "bold" | "italic" | "underline", value: boolean) => {
+    if (key === "bold") {
+      setTextBold(value);
+      textBoldRef.current = value;
+    }
+    if (key === "italic") {
+      setTextItalic(value);
+      textItalicRef.current = value;
+    }
+    if (key === "underline") {
+      setTextUnderline(value);
+      textUnderlineRef.current = value;
+    }
+    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (targetId) {
+      setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, [key]: value } : t));
     }
   };
 
@@ -1475,7 +1703,7 @@ export default function EditorPage() {
     pageState.textAnnotations.forEach(annotation => {
       ctx.save();
       ctx.fillStyle = annotation.color ?? TEXT_COLOR;
-      ctx.font = `${annotation.fontSize * scaleY}px 'Excalifont', 'Instrument Sans', Arial, sans-serif`;
+      ctx.font = `${annotation.italic ? "italic " : ""}${annotation.bold ? "700 " : ""}${annotation.fontSize * scaleY}px 'Excalifont', 'Instrument Sans', Arial, sans-serif`;
       ctx.textBaseline = "top";
       ctx.textAlign = annotation.align ?? "left";
       const maxWidth = Math.max(80, (pageState.canvasWidth - annotation.x - 24) * scaleX);
@@ -1910,7 +2138,6 @@ export default function EditorPage() {
     : activeTool === "highlighter"
       ? HIGHLIGHT_PALETTE
       : PALETTE;
-
   const toolBtn = (id: string, icon: React.ReactNode, label: string, action?: () => void) => {
     const isActive = !action && activeTool === id;
     return (
@@ -1920,11 +2147,11 @@ export default function EditorPage() {
         title={label}
         style={{
           display: "flex", flexDirection: "column", alignItems: "center",
-          gap: "5px", padding: "10px 6px", borderRadius: "12px", width: "100%",
+          gap: "6px", padding: "9px 6px", borderRadius: "14px", width: "100%",
           border: "none", cursor: "pointer", transition: "all 0.15s ease",
           background: isActive ? c.toolActive : "transparent",
           color: isActive ? c.toolActiveTxt : c.toolInactiveTxt,
-          fontWeight: 700, fontSize: "10px", letterSpacing: "0.03em",
+          fontWeight: 700, fontSize: "11px", letterSpacing: "0.02em",
         }}
       >
         <div style={{ width: "22px", height: "22px" }}>{icon}</div>
@@ -2004,13 +2231,13 @@ export default function EditorPage() {
     : "Shapes";
   const activeShapeIcon = activeShape
     ? ({
-        rect: <Square size={14} />,
-        ellipse: <Circle size={14} />,
-        diamond: <Diamond size={14} />,
-        line: <Minus size={14} />,
-        arrow: <ArrowRight size={14} />,
+        rect: <Square size={19} />,
+        ellipse: <Circle size={19} />,
+        diamond: <Diamond size={19} />,
+        line: <Minus size={19} />,
+        arrow: <ArrowRight size={19} />,
       } as Record<ShapeTool, React.ReactNode>)[activeShape]
-    : <Square size={20} />;
+    : <Square size={19} />;
 
   const pageDockBtnStyle = (theme: typeof c, active = false): React.CSSProperties => ({
     width: "34px",
@@ -2043,6 +2270,7 @@ export default function EditorPage() {
       <header style={{
         gridColumn: "1 / -1", gridRow: "1",
         background: c.headerBg, borderBottom: `1px solid ${c.headerBorder}`,
+        position: "relative",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 20px", gap: "12px", minWidth: 0, overflow: "hidden",
         transition: "background 0.2s",
@@ -2083,6 +2311,12 @@ export default function EditorPage() {
           display: isPdfLoaded ? "flex" : "none", alignItems: "center", gap: "10px",
           background: c.sidebarBg, border: `1px solid ${c.sidebarBorder}`,
           borderRadius: "999px", padding: "7px 12px",
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          zIndex: 1,
+          whiteSpace: "nowrap",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             {activePalette.map(col => (
@@ -2129,26 +2363,26 @@ export default function EditorPage() {
           {(activeTool === "text" || activeTool === "signature") && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-              <select
+              <TextDropdown
                 value={textFontSize}
-                onChange={e => setTextFontSize(+e.target.value)}
-                title="Font size"
-                style={compactSelectStyle("74px")}
-              >
-                {[12, 14, 16, 18, 20, 22, 24, 28, 32, 36].map(size => (
-                  <option key={size} value={size}>{size}px</option>
-                ))}
-              </select>
-              <select
+                width="74px"
+                label="Font size"
+                options={[12, 14, 16, 18, 20, 22, 24, 28, 32, 36]}
+                onChange={setTextFontSize}
+                formatOption={size => `${size}px`}
+                theme={c}
+                darkMode={dm}
+              />
+              <TextDropdown
                 value={textLineHeight}
-                onChange={e => setTextLineHeight(+e.target.value)}
-                title="Line spacing"
-                style={compactSelectStyle("82px")}
-              >
-                {[1.05, 1.15, 1.25, 1.35, 1.5, 1.65, 1.8, 2].map(space => (
-                  <option key={space} value={space}>{space.toFixed(2)}</option>
-                ))}
-              </select>
+                width="82px"
+                label="Line spacing"
+                options={[1.05, 1.15, 1.25, 1.35, 1.5, 1.65, 1.8, 2]}
+                onChange={setTextLineHeight}
+                formatOption={space => space.toFixed(2)}
+                theme={c}
+                darkMode={dm}
+              />
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <button onClick={() => setTextAlign("left")} title="Align left" style={alignBtnStyle(currentTextAlign() === "left")}>
                   <AlignLeft size={14} />
@@ -2160,64 +2394,156 @@ export default function EditorPage() {
                   <AlignRight size={14} />
                 </button>
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <button onClick={() => setTextStyle("bold", !textBold)} title="Bold" style={alignBtnStyle(textBold)}>
+                  <Bold size={14} />
+                </button>
+                <button onClick={() => setTextStyle("italic", !textItalic)} title="Italic" style={alignBtnStyle(textItalic)}>
+                  <Italic size={14} />
+                </button>
+                <button onClick={() => setTextStyle("underline", !textUnderline)} title="Underline" style={alignBtnStyle(textUnderline)}>
+                  <Underline size={14} />
+                </button>
+              </div>
             </>
           )}
-          <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            {[
-              { id: "fit-width" as ViewMode, label: "W" },
-              { id: "fit-page" as ViewMode, label: "P" },
-              { id: "actual" as ViewMode, label: "1:1" },
-            ].map(mode => (
+          {isShapeTool(activeTool) && (
+            <>
+              <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
+              <select
+                value={activeTool}
+                onChange={e => selectTool(e.target.value)}
+                title="Shape"
+                style={compactSelectStyle("92px")}
+              >
+                <option value="rect">Rect</option>
+                <option value="ellipse">Ellipse</option>
+                <option value="diamond">Diamond</option>
+                <option value="line">Line</option>
+                <option value="arrow">Arrow</option>
+              </select>
+              <select
+                value={brushWidth}
+                onChange={e => {
+                  const v = +e.target.value;
+                  setBrushWidth(v);
+                  brushWidthRef.current = v;
+                }}
+                title="Stroke width"
+                style={compactSelectStyle("84px")}
+              >
+                {[1, 2, 3, 4, 6, 8, 10, 12].map(size => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+              <select
+                value={activeColor}
+                onChange={e => {
+                  setActiveColor(e.target.value);
+                  activeColorRef.current = e.target.value;
+                }}
+                title="Stroke color"
+                style={compactSelectStyle("104px")}
+              >
+                {PALETTE.map(col => (
+                  <option key={col.hex} value={col.hex}>{col.name}</option>
+                ))}
+              </select>
+              <select
+                value={shapeFillColor}
+                onChange={e => {
+                  setShapeFillColor(e.target.value);
+                  shapeFillColorRef.current = e.target.value;
+                }}
+                title="Fill"
+                style={compactSelectStyle("104px")}
+              >
+                <option value={NO_FILL}>No fill</option>
+                {PALETTE.map(col => (
+                  <option key={col.hex} value={col.hex}>{col.name}</option>
+                ))}
+              </select>
+              <select
+                value={shapeFillStyle}
+                onChange={e => {
+                  const next = e.target.value as ShapeFillStyle;
+                  setShapeFillStyle(next);
+                  shapeFillStyleRef.current = next;
+                  if (shapeFillColorRef.current === NO_FILL) {
+                    const fallbackFill = activeColorRef.current === NO_FILL ? PALETTE[0].hex : activeColorRef.current;
+                    setShapeFillColor(fallbackFill);
+                    shapeFillColorRef.current = fallbackFill;
+                  }
+                }}
+                title="Fill style"
+                style={compactSelectStyle("104px")}
+              >
+                <option value="hachure">Hachure</option>
+                <option value="cross-hatch">Cross-hatch</option>
+                <option value="solid">Solid</option>
+              </select>
+            </>
+          )}
+          {activeTool === "select" && (
+            <>
+              <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                {[
+                  { id: "fit-width" as ViewMode, label: "W" },
+                  { id: "fit-page" as ViewMode, label: "P" },
+                  { id: "actual" as ViewMode, label: "1:1" },
+                ].map(mode => (
+                  <button
+                    key={mode.id}
+                    onClick={() => changeViewMode(mode.id)}
+                    title={mode.id === "fit-width" ? "Fit width" : mode.id === "fit-page" ? "Fit page" : "Actual size"}
+                    style={{
+                      width: "38px",
+                      height: "28px",
+                      borderRadius: "10px",
+                      border: "none",
+                      background: viewMode === mode.id ? c.toolActive : "transparent",
+                      color: viewMode === mode.id ? c.toolActiveTxt : c.docMuted,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "11px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <button
-                key={mode.id}
-                onClick={() => changeViewMode(mode.id)}
-                title={mode.id === "fit-width" ? "Fit width" : mode.id === "fit-page" ? "Fit page" : "Actual size"}
+                onClick={() => changeZoom(zoomLevel - 0.1)}
+                title="Zoom out"
                 style={{
-                  width: "38px",
-                  height: "28px",
-                  borderRadius: "10px",
-                  border: "none",
-                  background: viewMode === mode.id ? c.toolActive : "transparent",
-                  color: viewMode === mode.id ? c.toolActiveTxt : c.docMuted,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontSize: "11px",
-                  fontWeight: 900,
+                  width: "32px", height: "32px", borderRadius: "50%",
+                  border: `1px solid ${c.headerBorder}`,
+                  background: "transparent", color: c.docMuted,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >
-                {mode.label}
+                <ZoomOut size={15} />
               </button>
-            ))}
-          </div>
-          <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-          <button
-            onClick={() => changeZoom(zoomLevel - 0.1)}
-            title="Zoom out"
-            style={{
-              width: "32px", height: "32px", borderRadius: "50%",
-              border: `1px solid ${c.headerBorder}`,
-              background: "transparent", color: c.docMuted,
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <ZoomOut size={15} />
-          </button>
-          <span style={{ fontSize: "11px", fontWeight: 900, color: c.docMuted, width: "38px", textAlign: "center" }}>
-            {Math.round(zoomLevel * 100)}%
-          </span>
-          <button
-            onClick={() => changeZoom(zoomLevel + 0.1)}
-            title="Zoom in"
-            style={{
-              width: "32px", height: "32px", borderRadius: "50%",
-              border: `1px solid ${c.headerBorder}`,
-              background: "transparent", color: c.docMuted,
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <ZoomIn size={15} />
-          </button>
+              <span style={{ fontSize: "11px", fontWeight: 900, color: c.docMuted, width: "38px", textAlign: "center" }}>
+                {Math.round(zoomLevel * 100)}%
+              </span>
+              <button
+                onClick={() => changeZoom(zoomLevel + 0.1)}
+                title="Zoom in"
+                style={{
+                  width: "32px", height: "32px", borderRadius: "50%",
+                  border: `1px solid ${c.headerBorder}`,
+                  background: "transparent", color: c.docMuted,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <ZoomIn size={15} />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Right actions */}
@@ -2273,13 +2599,13 @@ export default function EditorPage() {
         gridColumn: "1", gridRow: "2",
         background: c.sidebarBg, borderRight: `1px solid ${c.sidebarBorder}`,
         display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "center",
-        justifyContent: "space-between", padding: "16px 8px",
+        justifyContent: "space-between", padding: "14px 10px",
         transition: "background 0.2s",
       }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "100%" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", width: "100%" }}>
           <Link href="/" style={{ textDecoration: "none", marginBottom: "14px" }}>
             <div style={{
-              width: "42px", height: "42px", borderRadius: "12px",
+              width: "42px", height: "42px", borderRadius: "14px",
               background: c.toolActive, display: "flex", alignItems: "center",
               justifyContent: "center", cursor: "pointer",
             }}>
@@ -2287,65 +2613,91 @@ export default function EditorPage() {
             </div>
           </Link>
 
-          <div style={{ display: isPdfLoaded ? "block" : "none", width: "32px", height: "1px", background: c.sidebarBorder, margin: "8px 0" }} />
-          <div style={{ display: isPdfLoaded ? "contents" : "none" }}>
-          <span style={{ fontSize: "9px", fontWeight: 800, letterSpacing: "0.08em", color: c.docMuted, textTransform: "uppercase", marginBottom: "4px" }}>Tools</span>
-
-          {toolBtn("highlighter", <Highlighter size={20} />, "Highlight")}
-          {toolBtn("select",      <Hand size={20} />,        "Select")}
-          {toolBtn("pencil",      <Pencil size={20} />,      "Draw")}
-          {toolBtn("text",        <Type size={20} />,        "Text")}
-          {toolBtn("signature",   <PenLine size={20} />,     "Sign")}
-          <div style={{ position: "relative", width: "100%" }}>
+          <div style={{ display: isPdfLoaded ? "block" : "none", width: "28px", height: "1px", background: c.sidebarBorder, margin: "8px 0 2px" }} />
+          <div style={{ display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "stretch", gap: "6px", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", margin: "2px 0 4px" }}>
+            <span style={{ fontSize: "9px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center" }}>Tools</span>
             <button
-              onClick={() => setShowShapeMenu(v => !v)}
-              title="Shapes"
+              type="button"
+              onClick={() => setShowHelpPanel(v => !v)}
+              title="Hotkeys help"
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "5px",
-                padding: "10px 6px",
-                borderRadius: "12px",
-                width: "100%",
+                width: "26px",
+                height: "26px",
+                borderRadius: "50%",
                 border: "none",
+                background: showHelpPanel ? c.toolActive : "transparent",
+                color: showHelpPanel ? c.toolActiveTxt : c.docMuted,
                 cursor: "pointer",
-                transition: "all 0.15s ease",
-                background: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActive : "transparent",
-                color: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActiveTxt : c.toolInactiveTxt,
-                fontWeight: 700,
-                fontSize: "10px",
-                letterSpacing: "0.03em",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
               }}
             >
-              <div style={{ width: "22px", height: "22px" }}>
-                {activeShapeIcon}
-              </div>
-              <span>{activeShapeLabel}</span>
+              <CircleHelp size={16} strokeWidth={2.2} />
             </button>
-            {showShapeMenu && (
-              <div style={{
-                position: "absolute",
-                left: "58px",
-                top: "0",
-                zIndex: 80,
-                width: "150px",
-                padding: "8px",
-                borderRadius: "14px",
-                border: `1px solid ${c.panelBorder}`,
-                background: c.panelBg,
-                boxShadow: "0 12px 30px rgba(0,0,0,0.16)",
-              }}>
-                {shapeToolBtn("rect", <Square size={14} />, "Rect")}
-                {shapeToolBtn("ellipse", <Circle size={14} />, "Ellipse")}
-                {shapeToolBtn("diamond", <Diamond size={14} />, "Diamond")}
-                {shapeToolBtn("line", <Minus size={14} />, "Line")}
-                {shapeToolBtn("arrow", <ArrowRight size={14} />, "Arrow")}
-              </div>
-            )}
           </div>
-          {toolBtn("eraser",      <Eraser size={20} />,      "Eraser")}
-          {toolBtn("note-btn",    <MessageSquare size={20} />, "Note", addNote)}
+
+          {toolBtn("highlighter", <Highlighter size={19} />, "Highlight")}
+          {toolBtn("select",      <Hand size={19} />,        "Select")}
+          {toolBtn("pencil",      <Pencil size={19} />,      "Draw")}
+          <button
+            type="button"
+            onClick={() => selectTool(activeShape ?? "rect")}
+            title="Shapes"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "6px",
+              padding: "9px 6px",
+              borderRadius: "14px",
+              width: "100%",
+              border: "none",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+              background: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActive : "transparent",
+              color: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActiveTxt : c.toolInactiveTxt,
+              fontWeight: 700,
+              fontSize: "11px",
+              letterSpacing: "0.02em",
+            }}
+          >
+            <div style={{ width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {activeShapeIcon}
+            </div>
+            <span>Shape</span>
+          </button>
+          {toolBtn("text",        <Type size={19} />,        "Text")}
+          {toolBtn("signature",   <PenLine size={19} />,     "Sign")}
+          {toolBtn("eraser",      <Eraser size={19} />,      "Eraser")}
+          {toolBtn("note-btn",    <MessageSquare size={19} />, "Note", addNote)}
+          {showHelpPanel && (
+            <div style={{
+              marginTop: "10px",
+              width: "100%",
+              borderRadius: "14px",
+              border: `1px solid ${c.sidebarBorder}`,
+              background: c.panelBg,
+              padding: "10px",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <strong style={{ fontSize: "12px" }}>Hotkeys</strong>
+                <button onClick={() => setShowHelpPanel(false)} style={pageDockBtnStyle(c)}>×</button>
+              </div>
+              <div style={{ display: "grid", gap: "6px", fontSize: "11px", color: c.docMuted, lineHeight: 1.4 }}>
+                <div><strong style={{ color: c.docText }}>Esc</strong> Clear selection</div>
+                <div><strong style={{ color: c.docText }}>Delete</strong> Remove selected object</div>
+                <div><strong style={{ color: c.docText }}>Ctrl/Cmd+Z</strong> Undo</div>
+                <div><strong style={{ color: c.docText }}>Shift+Ctrl/Cmd+Z</strong> Redo</div>
+                <div><strong style={{ color: c.docText }}>Ctrl/Cmd+O</strong> Open file</div>
+                <div><strong style={{ color: c.docText }}>Ctrl/Cmd++</strong> Zoom in</div>
+                <div><strong style={{ color: c.docText }}>Ctrl/Cmd+-</strong> Zoom out</div>
+              </div>
+            </div>
+          )}
           </div>
         </div>
       </aside>
@@ -2353,12 +2705,38 @@ export default function EditorPage() {
       {/* ── MAIN CANVAS ─────────────────────────────────────────────── */}
       <main ref={mainRef} style={{
         gridColumn: isPdfLoaded ? "2" : "1", gridRow: "2",
+        position: "relative",
         background: c.bg, overflowY: "auto", overflowX: "hidden",
         display: "flex", flexDirection: "column", alignItems: "center",
         minWidth: 0, minHeight: 0,
         padding: isPdfLoaded ? "32px 40px 80px 40px" : "0",
         transition: "background 0.2s",
       }} className="hide-scrollbar">
+
+        {isPdfLoaded && showToolTips && (
+          <div style={{
+            position: "absolute",
+            top: "10px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 20,
+            pointerEvents: "none",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", minHeight: "16px" }}>
+              <span style={{
+                fontSize: "11px",
+                color: c.docMuted,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                lineHeight: 1.1,
+                background: "transparent",
+              }}>
+                {toolTipText}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* ── DOCUMENT PAPER ── */}
         <div
@@ -2509,6 +2887,9 @@ export default function EditorPage() {
                     backgroundPosition: `0 ${10}px`,
                     fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                     fontSize: `${annotation.fontSize}px`,
+                    fontWeight: annotation.bold ? 700 : 400,
+                    fontStyle: annotation.italic ? "italic" : "normal",
+                    textDecoration: annotation.underline ? "underline" : "none",
                     lineHeight: `${annotation.fontSize * annotation.lineHeight}px`,
                     resize: "none",
                     overflowX: "auto",
@@ -2542,6 +2923,9 @@ export default function EditorPage() {
                   color: annotation.color ?? activeColor,
                   fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                   fontSize: `${annotation.fontSize}px`,
+                  fontWeight: annotation.bold ? 700 : 400,
+                  fontStyle: annotation.italic ? "italic" : "normal",
+                  textDecoration: annotation.underline ? "underline" : "none",
                   lineHeight: `${annotation.fontSize * annotation.lineHeight}px`,
                   textAlign: annotation.align ?? "left",
                   whiteSpace: "pre-wrap",
@@ -2724,23 +3108,31 @@ export default function EditorPage() {
                 position: "absolute",
                 left: note.x, top: note.y,
                 zIndex: 20, cursor: "grab",
-                outline: selectedObject?.kind === "note" && selectedObject.id === note.id
-                  ? `2px solid ${dm ? "#FFF3B0" : "#25324A"}`
+                filter: selectedObject?.kind === "note" && selectedObject.id === note.id
+                  ? "drop-shadow(0 0 0 1px rgba(37,50,74,0.14))"
                   : "none",
-                outlineOffset: "6px",
               }}
             >
               <div style={{
                 width: "170px", minHeight: "80px",
                 background: c.noteBg, border: `1.5px solid ${c.noteBorder}`,
                 borderRadius: "12px", padding: "10px 12px",
-                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                boxShadow: selectedObject?.kind === "note" && selectedObject.id === note.id
+                  ? "0 10px 24px rgba(0,0,0,0.10)"
+                  : "0 4px 16px rgba(0,0,0,0.12)",
                 fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                 position: "relative",
               }}>
                 {/* tail */}
                 <div style={{
-                  position: "absolute", left: "-9px", top: "22px",
+                  position: "absolute", left: "-10px", top: "22px",
+                  width: 0, height: 0,
+                  borderTop: "6px solid transparent",
+                  borderBottom: "6px solid transparent",
+                  borderRight: `10px solid ${c.noteBorder}`,
+                }} />
+                <div style={{
+                  position: "absolute", left: "-8px", top: "23px",
                   width: 0, height: 0,
                   borderTop: "5px solid transparent",
                   borderBottom: "5px solid transparent",
@@ -2899,33 +3291,6 @@ export default function EditorPage() {
           </div>
         )}
 
-        {isPdfLoaded && showHelpPanel && (
-          <div style={{
-            position: "fixed",
-            right: "20px",
-            bottom: "96px",
-            zIndex: 59,
-            width: "280px",
-            borderRadius: "18px",
-            border: `1px solid ${c.panelBorder}`,
-            background: c.panelBg,
-            boxShadow: "0 14px 36px rgba(0,0,0,0.10)",
-            padding: "14px 16px",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-              <strong style={{ fontSize: "13px" }}>Keyboard Help</strong>
-              <button onClick={() => setShowHelpPanel(false)} style={pageDockBtnStyle(c)}>×</button>
-            </div>
-            <div style={{ display: "grid", gap: "8px", fontSize: "12px", color: c.docMuted, lineHeight: 1.5 }}>
-              <div><strong>?</strong> Toggle this panel</div>
-              <div><strong>Delete</strong> Remove selected object</div>
-              <div><strong>Esc</strong> Clear selection</div>
-              <div><strong>Ctrl/Cmd+Z</strong> Undo, <strong>Shift</strong>+<strong>Ctrl/Cmd+Z</strong> Redo</div>
-              <div><strong>Ctrl/Cmd+O</strong> Open file</div>
-              <div><strong>Ctrl/Cmd++</strong> Zoom in, <strong>Ctrl/Cmd+-</strong> Zoom out</div>
-            </div>
-          </div>
-        )}
       </main>
 
       {isPdfLoaded && (
@@ -2966,7 +3331,7 @@ export default function EditorPage() {
               <ImageIcon size={16} />
             </button>
             <button onClick={addBlankPage} title="Add blank page" style={pageDockBtnStyle(c)}>
-              <Plus size={17} />
+              <Square size={16} />
             </button>
             <button onClick={() => insertPdfInputRef.current?.click()} title="Insert PDF or picture after current page" style={pageDockBtnStyle(c)}>
               <FilePlus2 size={16} />

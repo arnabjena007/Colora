@@ -381,8 +381,8 @@ function TextDropdown<T extends string | number>({
             background: theme.panelBg,
             boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
             padding: "3px",
-            maxHeight: "128px",
-            overflowY: "auto",
+            maxHeight: "none",
+            overflowY: "hidden",
           }}
         >
           {options.map(option => {

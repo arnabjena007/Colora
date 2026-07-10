@@ -336,14 +336,14 @@ function TextDropdown<T extends string | number>({
 
   const buttonStyle: React.CSSProperties = {
     width,
-    height: "30px",
-    borderRadius: "10px",
+    height: "26px",
+    borderRadius: "8px",
     border: `1px solid ${theme.headerBorder}`,
     color: theme.docText,
     fontFamily: "inherit",
-    fontSize: "11px",
+    fontSize: "10px",
     fontWeight: 800,
-    padding: "0 8px 0 10px",
+    padding: "0 7px 0 9px",
     outline: "none",
     cursor: "pointer",
     display: "inline-flex",
@@ -374,12 +374,12 @@ function TextDropdown<T extends string | number>({
             left: anchor.left,
             zIndex: 9999,
             minWidth: width,
-            borderRadius: "14px",
+            borderRadius: "12px",
             border: `1px solid ${theme.headerBorder}`,
             background: theme.panelBg,
-            boxShadow: "0 14px 28px rgba(0,0,0,0.18)",
-            padding: "6px",
-            maxHeight: "240px",
+            boxShadow: "0 10px 22px rgba(0,0,0,0.14)",
+            padding: "4px",
+            maxHeight: "160px",
             overflowY: "auto",
           }}
         >
@@ -399,11 +399,11 @@ function TextDropdown<T extends string | number>({
                   border: "none",
                   background: selected ? theme.toolActive : "transparent",
                   color: selected ? theme.toolActiveTxt : theme.docText,
-                  borderRadius: "10px",
-                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  padding: "6px 8px",
                   textAlign: "left",
                   fontFamily: "inherit",
-                  fontSize: "12px",
+                  fontSize: "11px",
                   fontWeight: 700,
                   cursor: "pointer",
                 }}
@@ -2957,16 +2957,15 @@ export default function EditorPage() {
                   setActiveTool("select");
                   activeToolRef.current = "select";
                   setSelectedObject({ kind: "text", id: annotation.id });
-                  if (editingTextId !== annotation.id) {
-                    setTextFontSize(annotation.fontSize);
-                    setTextLineHeight(annotation.lineHeight);
-                    setTextAlign(annotation.align ?? "left");
-                    setTextBold(Boolean(annotation.bold));
-                    setTextItalic(Boolean(annotation.italic));
-                    setTextUnderline(Boolean(annotation.underline));
-                    setTextListStyleState(annotation.listStyle ?? "none");
-                    setEditingTextId(annotation.id);
-                  }
+                  selectedObjectRef.current = { kind: "text", id: annotation.id };
+                  setTextFontSize(annotation.fontSize);
+                  setTextLineHeight(annotation.lineHeight);
+                  setTextAlign(annotation.align ?? "left");
+                  setTextBold(Boolean(annotation.bold));
+                  setTextItalic(Boolean(annotation.italic));
+                  setTextUnderline(Boolean(annotation.underline));
+                  setTextListStyle(annotation.listStyle ?? "none");
+                  setEditingTextId(annotation.id);
                 }}
                 onDoubleClick={e => onTextDoubleClick(annotation, e)}
                 style={{

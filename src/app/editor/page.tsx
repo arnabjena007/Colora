@@ -761,7 +761,6 @@ export default function EditorPage() {
 
     const textContent = await page.getTextContent();
     if (!textContent.items?.length) {
-      toast("No selectable text found on this page");
       return;
     }
 

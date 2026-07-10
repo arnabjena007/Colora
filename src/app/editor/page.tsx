@@ -1393,13 +1393,6 @@ export default function EditorPage() {
   };
 
   // ─── EXPORT ───────────────────────────────────────────────────────
-  const dataUrlToBytes = (dataUrl: string) => {
-    const binary = atob(dataUrl.split(",")[1] ?? "");
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  };
-
   const drawPageNumber = (
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -1506,7 +1499,47 @@ export default function EditorPage() {
     }
   };
 
-  const buildImagePdf = (pages: { width: number; height: number; image: Uint8Array }[]) => {
+  type PdfImagePage = { width: number; height: number; image: Uint8Array; filter?: string };
+
+  const compressBytes = async (bytes: Uint8Array) => {
+    if (typeof CompressionStream === "undefined") return bytes;
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate"));
+    const chunks: Uint8Array[] = [];
+    const reader = stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const output = new Uint8Array(total);
+    let offset = 0;
+    chunks.forEach(chunk => {
+      output.set(chunk, offset);
+      offset += chunk.length;
+    });
+    return output;
+  };
+
+  const canvasToLosslessPdfImage = async (canvas: HTMLCanvasElement): Promise<PdfImagePage> => {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return { width: canvas.width, height: canvas.height, image: new Uint8Array() };
+    }
+
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const rgb = new Uint8Array(canvas.width * canvas.height * 3);
+    for (let src = 0, dst = 0; src < data.length; src += 4, dst += 3) {
+      rgb[dst] = data[src];
+      rgb[dst + 1] = data[src + 1];
+      rgb[dst + 2] = data[src + 2];
+    }
+
+    const image = await compressBytes(rgb);
+    return { width: canvas.width, height: canvas.height, image, filter: typeof CompressionStream === "undefined" ? undefined : "/FlateDecode" };
+  };
+
+  const buildImagePdf = (pages: PdfImagePage[]) => {
     const encoder = new TextEncoder();
     const parts: Uint8Array[] = [];
     const offsets: number[] = [];
@@ -1543,7 +1576,7 @@ export default function EditorPage() {
         addString(`<< /Length ${encoder.encode(stream).length} >>\nstream\n${stream}endstream`);
       });
       writeObject(imageObj, () => {
-        addString(`<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.image.length} >>\nstream\n`);
+        addString(`<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8${page.filter ? ` /Filter ${page.filter}` : ""} /Length ${page.image.length} >>\nstream\n`);
         addBytes(page.image);
         addString("\nendstream");
       });
@@ -1577,7 +1610,7 @@ export default function EditorPage() {
     try {
       savePageState(pageNum);
       toast("Building PDF...");
-      const exportedPages: { width: number; height: number; image: Uint8Array }[] = [];
+      const exportedPages: PdfImagePage[] = [];
       for (let i = 0; i < pagesRef.current.length; i++) {
         const source = pagesRef.current[i];
         const page = await source.doc.getPage(source.pageNumber);
@@ -1605,11 +1638,7 @@ export default function EditorPage() {
         if (includePageNumbersRef.current) {
           drawPageNumber(ctx, canvas.width, canvas.height, i + 1, pagesRef.current.length);
         }
-        exportedPages.push({
-          width: canvas.width,
-          height: canvas.height,
-          image: dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.98)),
-        });
+        exportedPages.push(await canvasToLosslessPdfImage(canvas));
       }
 
       const blob = buildImagePdf(exportedPages);

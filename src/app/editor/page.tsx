@@ -1292,7 +1292,7 @@ export default function EditorPage() {
     setPictures([]);
     setEditingTextId(null);
     setDocTitle("Blank page");
-    setDocSubtitle("Start from scratch");
+    setDocSubtitle("");
     setTotalPages(1);
     setPageNum(1);
     setIsPdfLoaded(true);

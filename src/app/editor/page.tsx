@@ -603,6 +603,9 @@ export default function EditorPage() {
   const selectTool = (tool: string) => {
     setActiveTool(tool);
     activeToolRef.current = tool;
+    setEditingTextId(null);
+    setSelectedObject(null);
+    selectedObjectRef.current = null;
     const canvas = annotCanvasRef.current;
     if (!canvas) return;
 
@@ -790,12 +793,16 @@ export default function EditorPage() {
       if (handle === "e" || handle === "w") next.h = Math.max(80, next.w * aspect);
       if (handle === "n" || handle === "s") next.w = Math.max(120, next.h / Math.max(0.01, aspect));
 
+      const round = (value: number) => Math.round(value * 2) / 2;
+      next.w = Math.max(120, next.w);
+      next.h = Math.max(80, next.h);
+
       setPictures(p => p.map(pic => pic.id === id ? {
         ...pic,
-        x: next.x,
-        y: next.y,
-        width: next.w,
-        height: next.h,
+        x: round(next.x),
+        y: round(next.y),
+        width: round(next.w),
+        height: round(next.h),
       } : pic));
     };
     const onUp = () => {

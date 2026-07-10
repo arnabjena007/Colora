@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Check, Download, ArrowUpRight, Sparkles, Layers3, PenTool, ShieldCheck, Wand2, FileText, ChevronDown } from "lucide-react";
+import { Check, Download, ArrowUpRight, Sparkles, Layers3, PenTool, ShieldCheck, Wand2, FileText, ChevronDown, FolderOpen } from "lucide-react";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -98,8 +98,8 @@ export default function Home() {
               </button>
             )}
             <Link href="/editor" className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#E5D4FF] text-[#5E5D6A] hover:bg-[#F9D5E5] font-bold text-xs rounded-full transition-all shadow-xs">
-              Launch Editor
-              <ArrowUpRight className="w-3.5 h-3.5" />
+              <FolderOpen className="w-3.5 h-3.5" />
+              Browse files
             </Link>
           </div>
         </div>
@@ -132,8 +132,8 @@ export default function Home() {
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Link href="/editor" className="inline-flex items-center gap-2 px-7 py-3.5 bg-[#E5D4FF] text-[#5E5D6A] hover:bg-[#F9D5E5] font-bold text-sm rounded-full transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.01] motion-hover-lift">
-                Open editor
                 <ArrowUpRight className="w-4 h-4" />
+                Blank page
               </Link>
               <a href="#features" className="inline-flex items-center gap-2 px-7 py-3.5 bg-white/72 backdrop-blur-md text-[#5E5D6A] hover:bg-white font-bold text-sm rounded-full transition-all shadow-sm border border-white/70 hover:scale-[1.01] motion-hover-lift">
                 Explore features

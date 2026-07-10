@@ -1816,7 +1816,6 @@ export default function EditorPage() {
         if (Array.isArray(saved.textAnnotations)) setTextAnnotations(saved.textAnnotations);
         if (Array.isArray(saved.pictures)) setPictures(saved.pictures);
         if (typeof saved.includePageNumbers === "boolean") setIncludePageNumbers(saved.includePageNumbers);
-        if (typeof saved.darkMode === "boolean") setDarkMode(saved.darkMode);
         if (typeof saved.viewMode === "string") setViewMode(saved.viewMode);
         if (typeof saved.zoomLevel === "number") setZoomLevel(saved.zoomLevel);
         if (typeof saved.pageNum === "number") setPageNum(saved.pageNum);
@@ -1830,13 +1829,13 @@ export default function EditorPage() {
   // ─── THEME ────────────────────────────────────────────────────────
   const dm = darkMode;
   const c = {
-    bg: dm ? "#10131A" : "#FAF9FB",
-    headerBg: dm ? "#171B24" : "#FFFFFF",
+    bg: dm ? "#10131A" : "#FBFAF8",
+    headerBg: dm ? "#171B24" : "rgba(255,255,255,0.86)",
     headerBorder: dm ? "#2A3040" : "#EDECF4",
-    sidebarBg: dm ? "#141923" : "#F9F7FF",
-    sidebarBorder: dm ? "#252C3A" : "#EDECF4",
+    sidebarBg: dm ? "#141923" : "#FFFFFF",
+    sidebarBorder: dm ? "#252C3A" : "#ECEAF3",
     docBg: dm ? "#FFFFFF" : "#FFFFFF",
-    docBorder: dm ? "#303746" : "#E5E4F2",
+    docBorder: dm ? "#303746" : "#E6E3F0",
     docText: dm ? "#E7EAF2" : "#5E5D6A",
     docMuted: dm ? "#9BA3B4" : "#8E8D9B",
     toolActive: dm ? "#2B3142" : "#E5D4FF",
@@ -1844,7 +1843,7 @@ export default function EditorPage() {
     toolInactive: "transparent",
     toolInactiveTxt: dm ? "#AAB2C2" : "#8E8D9B",
     panelBg: dm ? "#1C2230" : "#FFFFFF",
-    panelBorder: dm ? "#333B4D" : "#EDECF4",
+    panelBorder: dm ? "#333B4D" : "#ECEAF3",
     noteBg: dm ? "#2A2532" : "#FEFCEC",
     noteBorder: dm ? "#51445F" : "#EDE5A0",
     noteTxt: dm ? "#F6EAF2" : "#777052",
@@ -2329,7 +2328,7 @@ export default function EditorPage() {
             onMouseLeave={onMouseUp}
           />
 
-          {textAnnotations.map(annotation => {
+          {isPdfLoaded && textAnnotations.map(annotation => {
             const isEditing = editingTextId === annotation.id;
             if (isEditing) {
               return (
@@ -2598,7 +2597,7 @@ export default function EditorPage() {
           ))}
 
           {/* Draggable speech notes */}
-          {notes.map(note => (
+          {isPdfLoaded && notes.map(note => (
             <div
               key={note.id}
               onMouseDown={e => dragNote(note.id, e)}

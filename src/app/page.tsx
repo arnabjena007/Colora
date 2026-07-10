@@ -1,20 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Check, Download, ArrowUpRight, Sparkles, Layers3, PenTool, ShieldCheck, Wand2, FileText, ChevronDown, FolderOpen } from "lucide-react";
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-}
+import { Check, ArrowUpRight, Sparkles, Layers3, PenTool, ShieldCheck, Wand2, FileText, ChevronDown } from "lucide-react";
 
 export default function Home() {
   const [toastMsg, setToastMsg] = useState("");
   const [showToast, setShowToast] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isStandalone, setIsStandalone] = useState(false);
 
   const colors = [
     { name: "Lavender", hex: "#E5D4FF", bg: "bg-lavender" },
@@ -33,41 +26,6 @@ export default function Home() {
     });
   };
 
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-    };
-    const handleAppInstalled = () => {
-      setInstallPrompt(null);
-      setIsStandalone(true);
-      setToastMsg("Pastelle installed");
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 2000);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
-
-  const installApp = async () => {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-    const choice = await installPrompt.userChoice;
-    setInstallPrompt(null);
-    if (choice.outcome === "accepted") {
-      setToastMsg("Pastelle installed");
-    } else {
-      setToastMsg("Install cancelled");
-    }
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 2000);
-  };
-
   return (
     <div className="min-h-screen text-charcoal font-sans selection:bg-sky-blue/30 relative overflow-hidden bg-[#FBFAF8]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(229,212,255,0.40),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(251,250,248,0.96))]" />
@@ -75,31 +33,11 @@ export default function Home() {
 
       {/* TRANSPARENT HEADER BAR */}
       <header className="absolute top-0 left-0 right-0 z-50 py-6">
-        <div className="max-w-7xl mx-auto px-6 flex justify-between items-center">
+        <div className="max-w-7xl mx-auto px-6 flex justify-start items-center">
           <div className="flex items-center gap-2">
             <span className="font-sans font-bold text-2xl text-[#5E5D6A] tracking-tight flex items-center gap-1.5">
               <span className="text-xl text-[#8E8D9B]">✳</span> Pastelle
             </span>
-          </div>
-          <nav className="hidden md:flex items-center gap-8">
-            <a href="#overview" className="text-[#5E5D6A]/70 font-semibold text-sm hover:text-[#5E5D6A] transition-colors">Overview</a>
-            <a href="#features" className="text-[#5E5D6A]/70 font-semibold text-sm hover:text-[#5E5D6A] transition-colors">Features</a>
-            <a href="#preview" className="text-[#5E5D6A]/70 font-semibold text-sm hover:text-[#5E5D6A] transition-colors">Preview</a>
-          </nav>
-          <div className="flex items-center gap-3">
-            {installPrompt && !isStandalone && (
-              <button
-                onClick={installApp}
-                className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 bg-white/70 text-[#5E5D6A] hover:bg-white font-bold text-xs rounded-full transition-all shadow-xs border border-[#EDECF4]"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Install App
-              </button>
-            )}
-            <Link href="/editor" className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#E5D4FF] text-[#5E5D6A] hover:bg-[#F9D5E5] font-bold text-xs rounded-full transition-all shadow-xs">
-              <FolderOpen className="w-3.5 h-3.5" />
-              Getting started
-            </Link>
           </div>
         </div>
       </header>

@@ -312,22 +312,18 @@ function TextDropdown<T extends string | number>({
       setAnchor({ top: rect.bottom + 6, left: rect.left });
     };
     updateAnchor();
-    const onDown = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
     const onResize = () => updateAnchor();
-    window.addEventListener("mousedown", onDown);
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", updateAnchor, true);
     const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (ref.current && target && !ref.current.contains(target)) {
-        setOpen(false);
-      }
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (ref.current?.contains(target)) return;
+      if (target.closest("[data-text-dropdown-menu]")) return;
+      setOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
-      window.removeEventListener("mousedown", onDown);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", updateAnchor, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
@@ -369,6 +365,7 @@ function TextDropdown<T extends string | number>({
       {open && typeof document !== "undefined" && createPortal(
         <div
           data-text-toolbar
+          data-text-dropdown-menu
           style={{
             position: "fixed",
             top: anchor.top,

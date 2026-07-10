@@ -402,7 +402,6 @@ export default function EditorPage() {
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { activeColorRef.current = activeColor; }, [activeColor]);
   useEffect(() => { brushWidthRef.current = brushWidth; }, [brushWidth]);
-  useEffect(() => { textAlignRef.current = "left"; }, []);
   useEffect(() => { notesRef.current = notes; }, [notes]);
   useEffect(() => { textAnnotationsRef.current = textAnnotations; }, [textAnnotations]);
   useEffect(() => { picturesRef.current = pictures; }, [pictures]);
@@ -1075,8 +1074,8 @@ export default function EditorPage() {
     if (!isSelected || activeToolRef.current !== "select") {
       setSelectedObject({ kind: "text", id: annotation.id });
       selectedObjectRef.current = { kind: "text", id: annotation.id };
-      return;
     }
+    textAlignRef.current = annotation.align ?? "left";
     dragText(annotation.id, e);
   };
 
@@ -1089,13 +1088,15 @@ export default function EditorPage() {
     setTextLineHeight(annotation.lineHeight);
     setActiveColor(annotation.color);
     activeColorRef.current = annotation.color;
+    textAlignRef.current = annotation.align ?? "left";
     setEditingTextId(annotation.id);
   };
 
   const setTextAlign = (align: "left" | "center" | "right") => {
     textAlignRef.current = align;
-    if (editingTextId) {
-      setTextAnnotations(prev => prev.map(t => t.id === editingTextId ? { ...t, align } : t));
+    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (targetId) {
+      setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, align } : t));
     }
   };
 
@@ -2500,6 +2501,7 @@ export default function EditorPage() {
                     border: `1.5px solid ${darkMode ? "rgba(246,234,242,0.38)" : "rgba(94,93,106,0.24)"}`,
                     outline: "none",
                     color: darkMode ? "#FFFFFF" : (annotation.color ?? activeColor),
+                    textAlign: annotation.align ?? "left",
                     background: darkMode
                       ? "linear-gradient(to bottom, transparent calc(100% - 1px), rgba(246,234,242,0.28) 1px), #202633"
                       : "linear-gradient(to bottom, transparent calc(100% - 1px), rgba(94,93,106,0.22) 1px), #FFFFFF",
@@ -2541,6 +2543,7 @@ export default function EditorPage() {
                   fontFamily: "'Excalifont','Excalidraw',Quicksand,sans-serif",
                   fontSize: `${annotation.fontSize}px`,
                   lineHeight: `${annotation.fontSize * annotation.lineHeight}px`,
+                  textAlign: annotation.align ?? "left",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                   overflowWrap: "anywhere",

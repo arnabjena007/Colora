@@ -637,17 +637,16 @@ export default function EditorPage() {
     setSelectedObject(null);
     selectedObjectRef.current = null;
     setShowHelpPanel(false);
+    setShowBrushWidthMenu(false);
+    setShowTextSizeMenu(false);
+    setShowTextSpaceMenu(false);
+    setShowShapeMenu(false);
     const canvas = annotCanvasRef.current;
     if (canvas) {
       canvas.style.pointerEvents = "none";
       canvas.style.cursor = "default";
     }
     window.getSelection()?.removeAllRanges();
-    document.querySelectorAll<HTMLInputElement>(".text-annotation-input").forEach(input => {
-      input.value = "";
-      input.blur();
-      input.remove();
-    });
     setEditingTextId(null);
     toast("Select active");
   }, [toast]);
@@ -820,9 +819,6 @@ export default function EditorPage() {
     setActiveTool(tool);
     activeToolRef.current = tool;
     setShowShapeMenu(false);
-    setEditingTextId(null);
-    setSelectedObject(null);
-    selectedObjectRef.current = null;
     const canvas = annotCanvasRef.current;
     if (!canvas) return;
 
@@ -839,6 +835,13 @@ export default function EditorPage() {
       canvas.style.cursor = tool === "select" ? "default" : "text";
     } else {
       canvas.style.pointerEvents = "auto";
+    }
+
+    if (tool !== "select") {
+      setEditingTextId(null);
+      setSelectedObject(null);
+      selectedObjectRef.current = null;
+      activeTextIdRef.current = null;
     }
 
     // Adjust defaults per tool
@@ -1421,9 +1424,15 @@ export default function EditorPage() {
         setShowHelpPanel(v => !v);
       }
       if (e.key === "Escape") {
-        setSelectedObject(null);
-        selectedObjectRef.current = null;
         setShowHelpPanel(false);
+        setShowBrushWidthMenu(false);
+        setShowTextSizeMenu(false);
+        setShowTextSpaceMenu(false);
+        setShowShapeMenu(false);
+        if (!editingTextId) {
+          actions.clearActiveTool();
+        }
+        return;
       }
       const activeElement = document.activeElement as HTMLElement | null;
       if (activeElement?.closest('[contenteditable="true"], input, textarea')) return;
@@ -1436,7 +1445,7 @@ export default function EditorPage() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [removeNote, removePicture]);
+  }, [removeNote, removePicture, clearActiveTool, editingTextId]);
 
   // ─── SELECTION HIGHLIGHTER ────────────────────────────────────────
   useEffect(() => {

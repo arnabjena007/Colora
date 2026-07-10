@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import rough from "roughjs/bin/rough";
 import type { Options as RoughOptions } from "roughjs/bin/core";
@@ -29,6 +30,7 @@ interface TextAnnotationItem {
   lineHeight: number;
   color: string;
   align?: "left" | "center" | "right";
+  listStyle?: ListStyle;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -151,6 +153,7 @@ const NOTE_PLACEHOLDER = "Click to edit...";
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
 type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
+type ListStyle = "none" | "bullet" | "number" | "alpha";
 type SelectedObject =
   | { kind: "text"; id: string }
   | { kind: "note"; id: string }
@@ -316,10 +319,18 @@ function TextDropdown<T extends string | number>({
     window.addEventListener("mousedown", onDown);
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", updateAnchor, true);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (ref.current && target && !ref.current.contains(target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", updateAnchor, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [open]);
 
@@ -347,6 +358,7 @@ function TextDropdown<T extends string | number>({
     <div ref={ref} style={{ position: "relative" }}>
       <button
         type="button"
+        onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
         onClick={() => setOpen(v => !v)}
         title={label}
         style={buttonStyle}
@@ -354,18 +366,18 @@ function TextDropdown<T extends string | number>({
         <span style={{ flex: 1 }}>{formatOption ? formatOption(value) : String(value)}</span>
         <ChevronRight size={12} style={{ transform: "rotate(90deg)", opacity: 0.8 }} />
       </button>
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <div
           style={{
             position: "fixed",
             top: anchor.top,
             left: anchor.left,
-            zIndex: 80,
+            zIndex: 9999,
             minWidth: width,
             borderRadius: "14px",
             border: `1px solid ${theme.headerBorder}`,
             background: theme.panelBg,
-            boxShadow: "0 14px 28px rgba(0,0,0,0.14)",
+            boxShadow: "0 14px 28px rgba(0,0,0,0.18)",
             padding: "6px",
             maxHeight: "240px",
             overflowY: "auto",
@@ -377,6 +389,7 @@ function TextDropdown<T extends string | number>({
               <button
                 key={String(option)}
                 type="button"
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
                 onClick={() => {
                   onChange(option);
                   setOpen(false);
@@ -399,7 +412,8 @@ function TextDropdown<T extends string | number>({
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -494,6 +508,7 @@ export default function EditorPage() {
   const [textBold, setTextBold] = useState(false);
   const [textItalic, setTextItalic] = useState(false);
   const [textUnderline, setTextUnderline] = useState(false);
+  const [textListStyle, setTextListStyleState] = useState<ListStyle>("none");
   const [shapeFillColor, setShapeFillColor] = useState<string>(NO_FILL);
   const [shapeFillStyle, setShapeFillStyle] = useState<ShapeFillStyle>("hachure");
   const [showBrushWidthMenu, setShowBrushWidthMenu] = useState(false);
@@ -536,6 +551,7 @@ export default function EditorPage() {
   const textBoldRef = useRef(false);
   const textItalicRef = useRef(false);
   const textUnderlineRef = useRef(false);
+  const textListStyleRef = useRef<ListStyle>("none");
   const shapeFillColorRef = useRef(NO_FILL);
   const shapeFillStyleRef = useRef<ShapeFillStyle>("hachure");
   const textLayerRef = useRef<HTMLDivElement | null>(null);
@@ -578,6 +594,7 @@ export default function EditorPage() {
   useEffect(() => { textBoldRef.current = textBold; }, [textBold]);
   useEffect(() => { textItalicRef.current = textItalic; }, [textItalic]);
   useEffect(() => { textUnderlineRef.current = textUnderline; }, [textUnderline]);
+  useEffect(() => { textListStyleRef.current = textListStyle; }, [textListStyle]);
   useEffect(() => { shapeFillColorRef.current = shapeFillColor; }, [shapeFillColor]);
   useEffect(() => { shapeFillStyleRef.current = shapeFillStyle; }, [shapeFillStyle]);
   useEffect(() => { notesRef.current = notes; }, [notes]);
@@ -1185,6 +1202,7 @@ export default function EditorPage() {
       setTextAnnotations(prev => prev.map(t => t.id === textId ? { ...t, text: clean } : t));
     }
     setEditingTextId(null);
+    setTextListStyle("none");
   };
 
   const wrapTextLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
@@ -1235,10 +1253,12 @@ export default function EditorPage() {
       lineHeight: textLineHeight,
       color: activeColorRef.current,
       align: textAlignRef.current,
+      listStyle: "none",
       bold: textBoldRef.current,
       italic: textItalicRef.current,
       underline: textUnderlineRef.current,
     }]);
+    setTextListStyle("none");
     setEditingTextId(id);
     saveState();
   };
@@ -1283,6 +1303,7 @@ export default function EditorPage() {
       selectedObjectRef.current = { kind: "text", id: annotation.id };
     }
     textAlignRef.current = annotation.align ?? "left";
+    setTextListStyle(annotation.listStyle ?? "none");
     dragText(annotation.id, e);
   };
 
@@ -1299,6 +1320,7 @@ export default function EditorPage() {
     setTextBold(Boolean(annotation.bold));
     setTextItalic(Boolean(annotation.italic));
     setTextUnderline(Boolean(annotation.underline));
+    setTextListStyle(annotation.listStyle ?? "none");
     setEditingTextId(annotation.id);
   };
 
@@ -1329,6 +1351,38 @@ export default function EditorPage() {
     }
   };
 
+  const updateCurrentTextAnnotation = (patch: Partial<TextAnnotationItem>) => {
+    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (!targetId) return;
+    setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, ...patch } : t));
+  };
+
+  const setTextFontSizeForCurrent = (size: number) => {
+    setTextFontSize(size);
+    updateCurrentTextAnnotation({ fontSize: size });
+  };
+
+  const setTextLineHeightForCurrent = (lineHeight: number) => {
+    setTextLineHeight(lineHeight);
+    updateCurrentTextAnnotation({ lineHeight });
+  };
+
+  const currentTextListStyle = (): ListStyle => {
+    const targetId = editingTextId ?? (selectedObject?.kind === "text" ? selectedObject.id : null);
+    if (targetId) {
+      return textAnnotations.find(t => t.id === targetId)?.listStyle ?? "none";
+    }
+    return "none";
+  };
+
+  const setTextListStyle = (listStyle: ListStyle) => {
+    setTextListStyleState(listStyle);
+    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (targetId) {
+      setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, listStyle } : t));
+    }
+  };
+
   const onDocumentMouseDownCapture = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((activeToolRef.current !== "text" && activeToolRef.current !== "signature") || !isPdfLoaded) return;
     const target = e.target as HTMLElement;
@@ -1338,6 +1392,19 @@ export default function EditorPage() {
     if (activeToolRef.current === "signature") insertSignatureAt(e.clientX, e.clientY);
     else insertTextAt(e.clientX, e.clientY);
   };
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      const canvasArea = containerRef.current;
+      if (!target) return;
+      if (canvasArea?.contains(target)) return;
+      if (target.closest("button, select, input, textarea, [contenteditable='true'], a")) return;
+      clearActiveTool();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [clearActiveTool]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2321,21 +2388,19 @@ export default function EditorPage() {
           left: "50%",
           top: "50%",
           transform: "translate(-50%, -50%)",
-          zIndex: 1,
+          zIndex: 70,
           whiteSpace: "nowrap",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {activePalette.map(col => (
-              <button
-                key={col.hex}
-                onClick={() => {
-                  setActiveColor(col.hex);
-                  activeColorRef.current = col.hex;
-                  if (editingTextId && activeTool === "text") {
-                    setTextAnnotations(prev => prev.map(t => t.id === editingTextId ? { ...t, color: col.hex } : t));
-                  }
-                }}
-                title={col.name}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {activePalette.map(col => (
+                  <button
+                    key={col.hex}
+                    onClick={() => {
+                      setActiveColor(col.hex);
+                      activeColorRef.current = col.hex;
+                      updateCurrentTextAnnotation({ color: col.hex });
+                    }}
+                    title={col.name}
                 style={{
                   width: "25px", height: "25px", borderRadius: "50%",
                   background: col.hex,
@@ -2350,22 +2415,26 @@ export default function EditorPage() {
               />
             ))}
           </div>
-          <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-          <select
-            value={brushWidth}
-            onChange={e => {
-              const v = +e.target.value;
-              setBrushWidth(v);
-              brushWidthRef.current = v;
-              setShowBrushWidthMenu(false);
-            }}
-            title="Brush size"
-            style={compactSelectStyle("74px")}
-          >
-            {(activeTool === "pencil" ? [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16] : [8, 12, 16, 20, 24, 28, 32, 40, 48]).map(size => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </select>
+          {activeTool === "pencil" && (
+            <>
+              <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
+              <select
+                value={brushWidth}
+                onChange={e => {
+                  const v = +e.target.value;
+                  setBrushWidth(v);
+                  brushWidthRef.current = v;
+                  setShowBrushWidthMenu(false);
+                }}
+                title="Brush size"
+                style={compactSelectStyle("74px")}
+              >
+                {[1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16].map(size => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </>
+          )}
           {((activeTool === "text" || activeTool === "signature") || selectedObject?.kind === "text" || editingTextId) && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
@@ -2374,7 +2443,7 @@ export default function EditorPage() {
                 width="74px"
                 label="Font size"
                 options={[12, 14, 16, 18, 20, 22, 24, 28, 32, 36]}
-                onChange={setTextFontSize}
+                onChange={setTextFontSizeForCurrent}
                 formatOption={size => `${size}px`}
                 theme={c}
                 darkMode={dm}
@@ -2384,30 +2453,40 @@ export default function EditorPage() {
                 width="82px"
                 label="Line spacing"
                 options={[1.05, 1.15, 1.25, 1.35, 1.5, 1.65, 1.8, 2]}
-                onChange={setTextLineHeight}
+                onChange={setTextLineHeightForCurrent}
                 formatOption={space => space.toFixed(2)}
                 theme={c}
                 darkMode={dm}
               />
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <button onClick={() => setTextAlign("left")} title="Align left" style={alignBtnStyle(currentTextAlign() === "left")}>
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextAlign("left")} title="Align left" style={alignBtnStyle(currentTextAlign() === "left")}>
                   <AlignLeft size={14} />
                 </button>
-                <button onClick={() => setTextAlign("center")} title="Align center" style={alignBtnStyle(currentTextAlign() === "center")}>
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextAlign("center")} title="Align center" style={alignBtnStyle(currentTextAlign() === "center")}>
                   <AlignCenter size={14} />
                 </button>
-                <button onClick={() => setTextAlign("right")} title="Align right" style={alignBtnStyle(currentTextAlign() === "right")}>
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextAlign("right")} title="Align right" style={alignBtnStyle(currentTextAlign() === "right")}>
                   <AlignRight size={14} />
                 </button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <button onClick={() => setTextStyle("bold", !textBold)} title="Bold" style={alignBtnStyle(textBold)}>
+                <TextDropdown
+                  value={currentTextListStyle()}
+                  width="118px"
+                  label="List Style"
+                  options={["none", "bullet", "number", "alpha"]}
+                  onChange={setTextListStyle}
+                  formatOption={style => style === "none" ? "None" : style === "bullet" ? "Bullets" : style === "number" ? "Numbers" : "Alpha"}
+                  theme={c}
+                  darkMode={dm}
+                />
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextStyle("bold", !textBold)} title="Bold" style={alignBtnStyle(textBold)}>
                   <Bold size={14} />
                 </button>
-                <button onClick={() => setTextStyle("italic", !textItalic)} title="Italic" style={alignBtnStyle(textItalic)}>
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextStyle("italic", !textItalic)} title="Italic" style={alignBtnStyle(textItalic)}>
                   <Italic size={14} />
                 </button>
-                <button onClick={() => setTextStyle("underline", !textUnderline)} title="Underline" style={alignBtnStyle(textUnderline)}>
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextStyle("underline", !textUnderline)} title="Underline" style={alignBtnStyle(textUnderline)}>
                   <Underline size={14} />
                 </button>
               </div>
@@ -2767,6 +2846,7 @@ export default function EditorPage() {
               display: isPdfLoaded ? "block" : "none",
               zIndex: 4,
               cursor: !activeTool ? "default"
+                : activeTool === "select" ? "default"
                 : activeTool === "pencil" ? "crosshair"
                 : activeTool === "highlighter" ? "text"
                 : activeTool === "text" || activeTool === "signature" ? "text"
@@ -2815,9 +2895,8 @@ export default function EditorPage() {
                       setSelectedObject({ kind: "text", id: annotation.id });
                       return;
                     }
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      finishTextEdit(annotation.id, e.currentTarget.value);
+                    if (e.key === "Enter") {
+                      return;
                     }
                   }}
                   onInput={e => {
@@ -2873,7 +2952,22 @@ export default function EditorPage() {
                 key={annotation.id}
                 className="text-annotation-item"
                 onMouseDown={e => onTextPointerDown(annotation, e)}
-                onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "text", id: annotation.id }); }}
+                onClick={e => {
+                  e.stopPropagation();
+                  setActiveTool("select");
+                  activeToolRef.current = "select";
+                  setSelectedObject({ kind: "text", id: annotation.id });
+                  if (editingTextId !== annotation.id) {
+                    setTextFontSize(annotation.fontSize);
+                    setTextLineHeight(annotation.lineHeight);
+                    setTextAlign(annotation.align ?? "left");
+                    setTextBold(Boolean(annotation.bold));
+                    setTextItalic(Boolean(annotation.italic));
+                    setTextUnderline(Boolean(annotation.underline));
+                    setTextListStyleState(annotation.listStyle ?? "none");
+                    setEditingTextId(annotation.id);
+                  }
+                }}
                 onDoubleClick={e => onTextDoubleClick(annotation, e)}
                 style={{
                   position: "absolute",
@@ -2902,12 +2996,18 @@ export default function EditorPage() {
                   boxShadow: selectedObject?.kind === "text" && selectedObject.id === annotation.id
                     ? `0 0 0 1px ${dm ? "rgba(229,212,255,0.7)" : "#E5D4FF"}`
                     : "none",
-                  pointerEvents: "auto",
+                    pointerEvents: activeTool === "select" ? "auto" : "none",
                   cursor: activeTool === "select" ? "move" : "text",
                   userSelect: "text",
                 }}
               >
-                {annotation.text || " "}
+                {annotation.listStyle === "bullet"
+                  ? `• ${annotation.text || ""}`
+                  : annotation.listStyle === "number"
+                    ? `1. ${annotation.text || ""}`
+                    : annotation.listStyle === "alpha"
+                      ? `A. ${annotation.text || ""}`
+                      : (annotation.text || " ")}
               </div>
             );
           })}

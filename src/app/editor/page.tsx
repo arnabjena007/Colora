@@ -1503,7 +1503,9 @@ export default function EditorPage() {
 
   const compressBytes = async (bytes: Uint8Array) => {
     if (typeof CompressionStream === "undefined") return bytes;
-    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate"));
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    const stream = new Blob([buffer]).stream().pipeThrough(new CompressionStream("deflate"));
     const chunks: Uint8Array[] = [];
     const reader = stream.getReader();
     while (true) {

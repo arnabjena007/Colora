@@ -147,6 +147,7 @@ const SHAPE_FILL_ALPHA = 0.38;
 const BLANK_PAGE_WIDTH = 800;
 const BLANK_PAGE_HEIGHT = 1060;
 const SUPPORTED_FILE_TYPES = "application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp";
+const NOTE_PLACEHOLDER = "Click to edit...";
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
 type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
@@ -862,7 +863,7 @@ export default function EditorPage() {
   // ─── NOTES ────────────────────────────────────────────────────────
   const addNote = () => {
     const id = crypto.randomUUID();
-    setNotes(prev => [...prev, { id, text: "Click to edit...", x: 160, y: 220 + prev.length * 100 }]);
+    setNotes(prev => [...prev, { id, text: "", x: 160, y: 220 + prev.length * 100 }]);
     setSelectedObject({ kind: "note", id });
     toast("Note added");
   };
@@ -1351,6 +1352,8 @@ export default function EditorPage() {
         selectedObjectRef.current = null;
         setShowHelpPanel(false);
       }
+      const activeElement = document.activeElement as HTMLElement | null;
+      if (activeElement?.closest('[contenteditable="true"], input, textarea')) return;
       if ((e.key === "Backspace" || e.key === "Delete") && selectedObjectRef.current) {
         const current = selectedObjectRef.current;
         if (current.kind === "note") removeNote(current.id);
@@ -2138,6 +2141,8 @@ export default function EditorPage() {
     : activeTool === "highlighter"
       ? HIGHLIGHT_PALETTE
       : PALETTE;
+  const toolbarIconSize = 16;
+  const sideIconSize = 16;
   const toolBtn = (id: string, icon: React.ReactNode, label: string, action?: () => void) => {
     const isActive = !action && activeTool === id;
     return (
@@ -2154,7 +2159,7 @@ export default function EditorPage() {
           fontWeight: 700, fontSize: "11px", letterSpacing: "0.02em",
         }}
       >
-        <div style={{ width: "22px", height: "22px" }}>{icon}</div>
+        <div style={{ width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
         <span>{label}</span>
       </button>
     );
@@ -2231,13 +2236,13 @@ export default function EditorPage() {
     : "Shapes";
   const activeShapeIcon = activeShape
     ? ({
-        rect: <Square size={19} />,
-        ellipse: <Circle size={19} />,
-        diamond: <Diamond size={19} />,
-        line: <Minus size={19} />,
-        arrow: <ArrowRight size={19} />,
+        rect: <Square size={toolbarIconSize} />,
+        ellipse: <Circle size={toolbarIconSize} />,
+        diamond: <Diamond size={toolbarIconSize} />,
+        line: <Minus size={toolbarIconSize} />,
+        arrow: <ArrowRight size={toolbarIconSize} />,
       } as Record<ShapeTool, React.ReactNode>)[activeShape]
-    : <Square size={19} />;
+    : <Square size={toolbarIconSize} />;
 
   const pageDockBtnStyle = (theme: typeof c, active = false): React.CSSProperties => ({
     width: "34px",
@@ -2548,9 +2553,6 @@ export default function EditorPage() {
 
         {/* Right actions */}
         <div style={{ display: isPdfLoaded ? "flex" : "none", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "11px", fontWeight: 800, color: c.docMuted, minWidth: "110px", textAlign: "right" }}>
-            {isSaving ? "Saving..." : lastSavedLabel}
-          </span>
           <button onClick={undo} title="Undo" style={{
             width: "36px", height: "36px", border: `1px solid ${c.headerBorder}`,
             borderRadius: "9px", background: "transparent", cursor: "pointer",
@@ -2609,39 +2611,19 @@ export default function EditorPage() {
               background: c.toolActive, display: "flex", alignItems: "center",
               justifyContent: "center", cursor: "pointer",
             }}>
-              <Home size={18} color={c.toolActiveTxt} />
+              <Home size={16} color={c.toolActiveTxt} />
             </div>
           </Link>
 
           <div style={{ display: isPdfLoaded ? "block" : "none", width: "28px", height: "1px", background: c.sidebarBorder, margin: "8px 0 2px" }} />
           <div style={{ display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "stretch", gap: "6px", width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", margin: "2px 0 4px" }}>
-            <span style={{ fontSize: "9px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center" }}>Tools</span>
-            <button
-              type="button"
-              onClick={() => setShowHelpPanel(v => !v)}
-              title="Hotkeys help"
-              style={{
-                width: "26px",
-                height: "26px",
-                borderRadius: "50%",
-                border: "none",
-                background: showHelpPanel ? c.toolActive : "transparent",
-                color: showHelpPanel ? c.toolActiveTxt : c.docMuted,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 0,
-              }}
-            >
-              <CircleHelp size={16} strokeWidth={2.2} />
-            </button>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", margin: "2px 0 4px", width: "100%" }}>
+            <span style={{ fontSize: "9px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center", width: "100%" }}>TOOLS</span>
           </div>
 
-          {toolBtn("highlighter", <Highlighter size={19} />, "Highlight")}
-          {toolBtn("select",      <Hand size={19} />,        "Select")}
-          {toolBtn("pencil",      <Pencil size={19} />,      "Draw")}
+          {toolBtn("highlighter", <Highlighter size={sideIconSize} />, "Highlight")}
+          {toolBtn("select",      <Hand size={sideIconSize} />,        "Select")}
+          {toolBtn("pencil",      <Pencil size={sideIconSize} />,      "Draw")}
           <button
             type="button"
             onClick={() => selectTool(activeShape ?? "rect")}
@@ -2669,35 +2651,10 @@ export default function EditorPage() {
             </div>
             <span>Shape</span>
           </button>
-          {toolBtn("text",        <Type size={19} />,        "Text")}
-          {toolBtn("signature",   <PenLine size={19} />,     "Sign")}
-          {toolBtn("eraser",      <Eraser size={19} />,      "Eraser")}
-          {toolBtn("note-btn",    <MessageSquare size={19} />, "Note", addNote)}
-          {showHelpPanel && (
-            <div style={{
-              marginTop: "10px",
-              width: "100%",
-              borderRadius: "14px",
-              border: `1px solid ${c.sidebarBorder}`,
-              background: c.panelBg,
-              padding: "10px",
-              boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <strong style={{ fontSize: "12px" }}>Hotkeys</strong>
-                <button onClick={() => setShowHelpPanel(false)} style={pageDockBtnStyle(c)}>×</button>
-              </div>
-              <div style={{ display: "grid", gap: "6px", fontSize: "11px", color: c.docMuted, lineHeight: 1.4 }}>
-                <div><strong style={{ color: c.docText }}>Esc</strong> Clear selection</div>
-                <div><strong style={{ color: c.docText }}>Delete</strong> Remove selected object</div>
-                <div><strong style={{ color: c.docText }}>Ctrl/Cmd+Z</strong> Undo</div>
-                <div><strong style={{ color: c.docText }}>Shift+Ctrl/Cmd+Z</strong> Redo</div>
-                <div><strong style={{ color: c.docText }}>Ctrl/Cmd+O</strong> Open file</div>
-                <div><strong style={{ color: c.docText }}>Ctrl/Cmd++</strong> Zoom in</div>
-                <div><strong style={{ color: c.docText }}>Ctrl/Cmd+-</strong> Zoom out</div>
-              </div>
-            </div>
-          )}
+          {toolBtn("text",        <Type size={sideIconSize} />,        "Text")}
+          {toolBtn("signature",   <PenLine size={sideIconSize} />,     "Sign")}
+          {toolBtn("eraser",      <Eraser size={sideIconSize} />,      "Eraser")}
+          {toolBtn("note-btn",    <MessageSquare size={sideIconSize} />, "Note", addNote)}
           </div>
         </div>
       </aside>
@@ -3151,6 +3108,20 @@ export default function EditorPage() {
                 <div
                   contentEditable
                   suppressContentEditableWarning
+                  onFocus={e => {
+                    const el = e.currentTarget;
+                    const current = notes.find(n => n.id === note.id);
+                    if (!current || current.text) return;
+                    updateNote(note.id, "");
+                    requestAnimationFrame(() => {
+                      const sel = window.getSelection();
+                      const range = document.createRange();
+                      range.selectNodeContents(el);
+                      range.collapse(true);
+                      sel?.removeAllRanges();
+                      sel?.addRange(range);
+                    });
+                  }}
                   onBlur={e => updateNote(note.id, e.currentTarget.innerText)}
                   style={{
                     fontSize: "13px", color: c.noteTxt,
@@ -3159,7 +3130,7 @@ export default function EditorPage() {
                     lineHeight: "1.55", userSelect: "text",
                   }}
                 >
-                  {note.text}
+                  {note.text || NOTE_PLACEHOLDER}
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
                   <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#CDEAC0", opacity: 0.85 }} />
@@ -3346,11 +3317,123 @@ export default function EditorPage() {
             <button onClick={deleteCurrentPage} title="Delete page" style={pageDockBtnStyle(c)}>
               <Trash2 size={16} />
             </button>
-            <button onClick={() => setDarkMode(d => !d)} title="Toggle dark mode" style={pageDockBtnStyle(c)}>
-              {dm ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
           </div>
         </aside>
+      )}
+
+      {isPdfLoaded && (
+        <div style={{
+          position: "fixed",
+          right: "16px",
+          bottom: "18px",
+          zIndex: 58,
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          alignItems: "flex-end",
+        }}>
+          <button
+            type="button"
+            onClick={() => setShowHelpPanel(v => !v)}
+            title="Hotkeys help"
+            style={{
+              width: "42px",
+              height: "42px",
+              borderRadius: "14px",
+              border: `1px solid ${showHelpPanel ? "#E5D4FF" : c.headerBorder}`,
+              background: showHelpPanel ? c.toolActive : c.panelBg,
+              color: showHelpPanel ? c.toolActiveTxt : c.docMuted,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.12)",
+            }}
+          >
+            <CircleHelp size={17} strokeWidth={2.2} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setDarkMode(d => !d)}
+            title="Toggle dark mode"
+            style={{
+              width: "42px",
+              height: "42px",
+              borderRadius: "14px",
+              border: `1px solid ${c.headerBorder}`,
+              background: c.panelBg,
+              color: c.docMuted,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.12)",
+            }}
+          >
+            {dm ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
+        </div>
+      )}
+
+      {isPdfLoaded && showHelpPanel && (
+        <div style={{
+          position: "fixed",
+          right: "16px",
+          bottom: "132px",
+          zIndex: 59,
+          width: "280px",
+          maxHeight: "320px",
+          borderRadius: "14px",
+          border: `1px solid ${c.panelBorder}`,
+          background: c.panelBg,
+          boxShadow: "0 16px 36px rgba(0,0,0,0.14)",
+          padding: "10px",
+          color: c.docMuted,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexShrink: 0 }}>
+            <strong style={{ fontSize: "11px", color: c.docText, letterSpacing: "0.04em" }}>Hotkeys</strong>
+            <button onClick={() => setShowHelpPanel(false)} style={pageDockBtnStyle(c)}>×</button>
+          </div>
+          <div style={{
+            display: "grid",
+            gap: "5px",
+            fontSize: "10px",
+            lineHeight: 1.35,
+            overflowY: "auto",
+            paddingRight: "4px",
+            minHeight: 0,
+          }}>
+            <div><strong style={{ color: c.docText }}>Esc</strong> Clear or exit the active tool</div>
+            <div><strong style={{ color: c.docText }}>Ctrl/Cmd + Z</strong> Undo</div>
+            <div><strong style={{ color: c.docText }}>Ctrl/Cmd + Shift + Z</strong> Redo</div>
+            <div><strong style={{ color: c.docText }}>Ctrl/Cmd + Y</strong> Redo</div>
+            <div><strong style={{ color: c.docText }}>Ctrl/Cmd + O</strong> Open file</div>
+            <div><strong style={{ color: c.docText }}>Ctrl/Cmd + N</strong> Add a blank page</div>
+            <div><strong style={{ color: c.docText }}>Ctrl/Cmd + S</strong> Export as PDF</div>
+            <div><strong style={{ color: c.docText }}>H</strong> Highlighter</div>
+            <div><strong style={{ color: c.docText }}>V</strong> Hand / Select / Pan tool</div>
+            <div><strong style={{ color: c.docText }}>P or D</strong> Draw tool</div>
+            <div><strong style={{ color: c.docText }}>T</strong> Text tool</div>
+            <div><strong style={{ color: c.docText }}>S</strong> Signature tool</div>
+            <div><strong style={{ color: c.docText }}>E</strong> Eraser</div>
+            <div><strong style={{ color: c.docText }}>R</strong> Rectangle</div>
+            <div><strong style={{ color: c.docText }}>O</strong> Ellipse</div>
+            <div><strong style={{ color: c.docText }}>M</strong> Diamond</div>
+            <div><strong style={{ color: c.docText }}>L</strong> Line</div>
+            <div><strong style={{ color: c.docText }}>A</strong> Arrow</div>
+            <div><strong style={{ color: c.docText }}>N</strong> Note</div>
+            <div><strong style={{ color: c.docText }}>I</strong> Insert picture</div>
+            <div><strong style={{ color: c.docText }}>Delete</strong> Delete current page</div>
+            <div><strong style={{ color: c.docText }}>← / Page Up</strong> Previous page</div>
+            <div><strong style={{ color: c.docText }}>→ / Page Down</strong> Next page</div>
+            <div><strong style={{ color: c.docText }}>+</strong> Zoom in</div>
+            <div><strong style={{ color: c.docText }}>-</strong> Zoom out</div>
+            <div><strong style={{ color: c.docText }}>0</strong> Fit page to width</div>
+          </div>
+        </div>
       )}
 
       {/* ── TOAST ── */}

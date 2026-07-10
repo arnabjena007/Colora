@@ -336,14 +336,14 @@ function TextDropdown<T extends string | number>({
 
   const buttonStyle: React.CSSProperties = {
     width,
-    height: "26px",
+    height: "24px",
     borderRadius: "8px",
     border: `1px solid ${theme.headerBorder}`,
     color: theme.docText,
     fontFamily: "inherit",
-    fontSize: "10px",
+    fontSize: "9px",
     fontWeight: 800,
-    padding: "0 7px 0 9px",
+    padding: "0 6px 0 8px",
     outline: "none",
     cursor: "pointer",
     display: "inline-flex",
@@ -374,12 +374,12 @@ function TextDropdown<T extends string | number>({
             left: anchor.left,
             zIndex: 9999,
             minWidth: width,
-            borderRadius: "12px",
+            borderRadius: "10px",
             border: `1px solid ${theme.headerBorder}`,
             background: theme.panelBg,
-            boxShadow: "0 10px 22px rgba(0,0,0,0.14)",
-            padding: "4px",
-            maxHeight: "160px",
+            boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
+            padding: "3px",
+            maxHeight: "132px",
             overflowY: "auto",
           }}
         >
@@ -399,11 +399,11 @@ function TextDropdown<T extends string | number>({
                   border: "none",
                   background: selected ? theme.toolActive : "transparent",
                   color: selected ? theme.toolActiveTxt : theme.docText,
-                  borderRadius: "8px",
-                  padding: "6px 8px",
+                  borderRadius: "7px",
+                  padding: "5px 7px",
                   textAlign: "left",
                   fontFamily: "inherit",
-                  fontSize: "11px",
+                  fontSize: "10px",
                   fontWeight: 700,
                   cursor: "pointer",
                 }}
@@ -1366,14 +1366,34 @@ export default function EditorPage() {
     setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, ...patch } : t));
   };
 
+  const syncActiveTextEditorStyle = (patch: { fontSize?: number; lineHeight?: number; color?: string; align?: "left" | "center" | "right" }) => {
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (!targetId) return;
+    const input = document.querySelector<HTMLTextAreaElement>(`.text-annotation-input[data-text-id="${targetId}"]`);
+    if (!input) return;
+    if (patch.fontSize) input.style.fontSize = `${patch.fontSize}px`;
+    if (patch.lineHeight) {
+      input.style.lineHeight = `${patch.fontSize ? patch.fontSize * patch.lineHeight : Number.parseFloat(input.style.fontSize || "18") * patch.lineHeight}px`;
+      input.style.backgroundSize = `100% ${patch.fontSize ? patch.fontSize * patch.lineHeight : Number.parseFloat(input.style.fontSize || "18") * patch.lineHeight}px`;
+    }
+    if (patch.color) input.style.color = patch.color;
+    if (patch.align) input.style.textAlign = patch.align;
+    requestAnimationFrame(() => {
+      input.style.height = "auto";
+      input.style.height = `${Math.max(48, input.scrollHeight + 4)}px`;
+    });
+  };
+
   const setTextFontSizeForCurrent = (size: number) => {
     setTextFontSize(size);
     updateCurrentTextAnnotation({ fontSize: size });
+    syncActiveTextEditorStyle({ fontSize: size });
   };
 
   const setTextLineHeightForCurrent = (lineHeight: number) => {
     setTextLineHeight(lineHeight);
     updateCurrentTextAnnotation({ lineHeight });
+    syncActiveTextEditorStyle({ lineHeight });
   };
 
   const currentTextListStyle = (): ListStyle => {
@@ -2455,7 +2475,7 @@ export default function EditorPage() {
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <TextDropdown
                 value={textFontSize}
-                width="74px"
+                width="66px"
                 label="Font size"
                 options={[12, 14, 16, 18, 20, 22, 24, 28, 32, 36]}
                 onChange={setTextFontSizeForCurrent}
@@ -2465,7 +2485,7 @@ export default function EditorPage() {
               />
               <TextDropdown
                 value={textLineHeight}
-                width="82px"
+                width="72px"
                 label="Line spacing"
                 options={[1.05, 1.15, 1.25, 1.35, 1.5, 1.65, 1.8, 2]}
                 onChange={setTextLineHeightForCurrent}
@@ -2487,7 +2507,7 @@ export default function EditorPage() {
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <TextDropdown
                   value={currentTextListStyle()}
-                  width="118px"
+                  width="100px"
                   label="List Style"
                   options={["none", "bullet", "number", "alpha"]}
                   onChange={setTextListStyle}
@@ -2924,6 +2944,7 @@ export default function EditorPage() {
                       el.scrollHeight + 4
                     )}px`;
                   }}
+                  data-text-id={annotation.id}
                   style={{
                     position: "absolute",
                     left: annotation.x,

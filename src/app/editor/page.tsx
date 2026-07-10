@@ -552,6 +552,7 @@ export default function EditorPage() {
   const textItalicRef = useRef(false);
   const textUnderlineRef = useRef(false);
   const textListStyleRef = useRef<ListStyle>("none");
+  const activeTextIdRef = useRef<string | null>(null);
   const shapeFillColorRef = useRef(NO_FILL);
   const shapeFillStyleRef = useRef<ShapeFillStyle>("hachure");
   const textLayerRef = useRef<HTMLDivElement | null>(null);
@@ -595,6 +596,9 @@ export default function EditorPage() {
   useEffect(() => { textItalicRef.current = textItalic; }, [textItalic]);
   useEffect(() => { textUnderlineRef.current = textUnderline; }, [textUnderline]);
   useEffect(() => { textListStyleRef.current = textListStyle; }, [textListStyle]);
+  useEffect(() => {
+    activeTextIdRef.current = editingTextId ?? (selectedObject?.kind === "text" ? selectedObject.id : null);
+  }, [editingTextId, selectedObject]);
   useEffect(() => { shapeFillColorRef.current = shapeFillColor; }, [shapeFillColor]);
   useEffect(() => { shapeFillStyleRef.current = shapeFillStyle; }, [shapeFillStyle]);
   useEffect(() => { notesRef.current = notes; }, [notes]);
@@ -1302,6 +1306,7 @@ export default function EditorPage() {
       setSelectedObject({ kind: "text", id: annotation.id });
       selectedObjectRef.current = { kind: "text", id: annotation.id };
     }
+    activeTextIdRef.current = annotation.id;
     textAlignRef.current = annotation.align ?? "left";
     setTextListStyle(annotation.listStyle ?? "none");
     dragText(annotation.id, e);
@@ -1312,6 +1317,7 @@ export default function EditorPage() {
     if (activeToolRef.current !== "select") return;
     setSelectedObject({ kind: "text", id: annotation.id });
     selectedObjectRef.current = { kind: "text", id: annotation.id };
+    activeTextIdRef.current = annotation.id;
     setTextFontSize(annotation.fontSize);
     setTextLineHeight(annotation.lineHeight);
     setActiveColor(annotation.color);
@@ -1326,7 +1332,7 @@ export default function EditorPage() {
 
   const setTextAlign = (align: "left" | "center" | "right") => {
     textAlignRef.current = align;
-    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (targetId) {
       setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, align } : t));
     }
@@ -1345,14 +1351,14 @@ export default function EditorPage() {
       setTextUnderline(value);
       textUnderlineRef.current = value;
     }
-    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (targetId) {
       setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, [key]: value } : t));
     }
   };
 
   const updateCurrentTextAnnotation = (patch: Partial<TextAnnotationItem>) => {
-    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (!targetId) return;
     setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, ...patch } : t));
   };
@@ -1368,7 +1374,7 @@ export default function EditorPage() {
   };
 
   const currentTextListStyle = (): ListStyle => {
-    const targetId = editingTextId ?? (selectedObject?.kind === "text" ? selectedObject.id : null);
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObject?.kind === "text" ? selectedObject.id : null);
     if (targetId) {
       return textAnnotations.find(t => t.id === targetId)?.listStyle ?? "none";
     }
@@ -1377,7 +1383,7 @@ export default function EditorPage() {
 
   const setTextListStyle = (listStyle: ListStyle) => {
     setTextListStyleState(listStyle);
-    const targetId = editingTextId ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (targetId) {
       setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, listStyle } : t));
     }
@@ -2958,6 +2964,7 @@ export default function EditorPage() {
                   activeToolRef.current = "select";
                   setSelectedObject({ kind: "text", id: annotation.id });
                   selectedObjectRef.current = { kind: "text", id: annotation.id };
+                  activeTextIdRef.current = annotation.id;
                   setTextFontSize(annotation.fontSize);
                   setTextLineHeight(annotation.lineHeight);
                   setTextAlign(annotation.align ?? "left");

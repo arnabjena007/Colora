@@ -1375,10 +1375,15 @@ export default function EditorPage() {
     if (!targetId) return;
     const input = document.querySelector<HTMLTextAreaElement>(`.text-annotation-input[data-text-id="${targetId}"]`);
     if (!input) return;
+    const currentFontSize = patch.fontSize ?? Number.parseFloat(input.style.fontSize || "18");
+    const currentLineHeight = patch.lineHeight ?? (Number.parseFloat(input.style.lineHeight || `${currentFontSize * 1.35}`) / currentFontSize);
+    const linePx = Math.max(1, currentFontSize * currentLineHeight);
     if (patch.fontSize) input.style.fontSize = `${patch.fontSize}px`;
-    if (patch.lineHeight) {
-      input.style.lineHeight = `${patch.fontSize ? patch.fontSize * patch.lineHeight : Number.parseFloat(input.style.fontSize || "18") * patch.lineHeight}px`;
-      input.style.backgroundSize = `100% ${patch.fontSize ? patch.fontSize * patch.lineHeight : Number.parseFloat(input.style.fontSize || "18") * patch.lineHeight}px`;
+    if (patch.lineHeight || patch.fontSize) {
+      input.style.lineHeight = `${linePx}px`;
+      input.style.backgroundSize = `100% ${linePx}px`;
+      input.style.minHeight = `${Math.max(48, linePx + 24)}px`;
+      input.style.height = `${Math.max(48, linePx + 24)}px`;
     }
     if (patch.color) input.style.color = patch.color;
     if (patch.align) input.style.textAlign = patch.align;
@@ -2475,7 +2480,7 @@ export default function EditorPage() {
             </>
           )}
           {((activeTool === "text" || activeTool === "signature") || selectedObject?.kind === "text" || editingTextId) && (
-            <>
+            <div data-text-toolbar style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <TextDropdown
                 value={textFontSize}
@@ -2509,11 +2514,11 @@ export default function EditorPage() {
                 </button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <TextDropdown
-                  value={currentTextListStyle()}
-                  width="100px"
-                  label="List Style"
-                  options={["none", "bullet", "number", "alpha"]}
+              <TextDropdown
+                value={currentTextListStyle()}
+                width="100px"
+                label="List Style"
+                options={["none", "bullet", "number", "alpha"]}
                   onChange={setTextListStyle}
                   formatOption={style => style === "none" ? "None" : style === "bullet" ? "Bullets" : style === "number" ? "Numbers" : "Alpha"}
                   theme={c}
@@ -2529,7 +2534,7 @@ export default function EditorPage() {
                   <Underline size={14} />
                 </button>
               </div>
-            </>
+            </div>
           )}
           {isShapeTool(activeTool) && (
             <>
@@ -2963,7 +2968,11 @@ export default function EditorPage() {
                     const nextValue = e.target.value.replace(/\r/g, "");
                     setTextAnnotations(prev => prev.map(t => t.id === annotation.id ? { ...t, text: nextValue } : t));
                   }}
-                  onBlur={e => finishTextEdit(annotation.id, e.currentTarget.value)}
+                  onBlur={e => {
+                    const nextTarget = e.relatedTarget as HTMLElement | null;
+                    if (nextTarget?.closest("[data-text-toolbar]")) return;
+                    finishTextEdit(annotation.id, e.currentTarget.value);
+                  }}
                   onPointerDown={e => e.stopPropagation()}
                   onKeyDown={e => {
                     if (e.key === "Escape") {

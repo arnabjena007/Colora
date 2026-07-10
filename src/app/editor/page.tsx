@@ -373,13 +373,15 @@ function TextDropdown<T extends string | number>({
             top: anchor.top,
             left: anchor.left,
             zIndex: 9999,
+            width,
             minWidth: width,
+            maxWidth: width,
             borderRadius: "10px",
             border: `1px solid ${theme.headerBorder}`,
             background: theme.panelBg,
             boxShadow: "0 8px 18px rgba(0,0,0,0.12)",
             padding: "3px",
-            maxHeight: "132px",
+            maxHeight: "128px",
             overflowY: "auto",
           }}
         >
@@ -403,8 +405,11 @@ function TextDropdown<T extends string | number>({
                   padding: "5px 7px",
                   textAlign: "left",
                   fontFamily: "inherit",
-                  fontSize: "10px",
+                  fontSize: "9px",
                   fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                   cursor: "pointer",
                 }}
               >

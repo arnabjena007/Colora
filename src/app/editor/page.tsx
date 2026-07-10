@@ -1283,7 +1283,7 @@ export default function EditorPage() {
     const blankDoc = createBlankPdfDocument();
     blankDocRef.current = blankDoc;
     pdfDocRef.current = blankDoc;
-    pagesRef.current = [{ doc: blankDoc, pageNumber: 1, name: "Blank page" }];
+    pagesRef.current = [{ doc: blankDoc, pageNumber: 1, name: "Untitled document" }];
     pageStoreRef.current.clear();
     undoListRef.current = [];
     redoListRef.current = [];
@@ -1291,7 +1291,7 @@ export default function EditorPage() {
     setTextAnnotations([]);
     setPictures([]);
     setEditingTextId(null);
-    setDocTitle("Blank page");
+    setDocTitle("Untitled document");
     setDocSubtitle("");
     setTotalPages(1);
     setPageNum(1);
@@ -1959,16 +1959,17 @@ export default function EditorPage() {
                 }}
                 placeholder="Untitled PDF"
               />
-              <input
-                value={docSubtitle}
-                onChange={e => setDocSubtitle(e.target.value)}
-                style={{
-                  background: "transparent", border: "none", outline: "none",
-                  fontSize: "11px", fontWeight: 500, color: c.docMuted,
-                  width: "200px", fontFamily: "inherit",
-                }}
-                placeholder="Subtitle"
-              />
+              {docSubtitle ? (
+                <input
+                  value={docSubtitle}
+                  onChange={e => setDocSubtitle(e.target.value)}
+                  style={{
+                    background: "transparent", border: "none", outline: "none",
+                    fontSize: "11px", fontWeight: 500, color: c.docMuted,
+                    width: "200px", fontFamily: "inherit",
+                  }}
+                />
+              ) : null}
             </>
           ) : (
             <span style={{ fontSize: "16px", fontWeight: 800, color: c.inputColor }}>Pastelle</span>

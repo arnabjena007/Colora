@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Check, ArrowUpRight, Sparkles, Layers3, PenTool, ShieldCheck, Wand2, FileText, ChevronDown } from "lucide-react";
+import { Check, Download, ArrowUpRight, Sparkles, Layers3, PenTool, ShieldCheck, Wand2, FileText, ChevronDown } from "lucide-react";
 
 export default function Home() {
   const [toastMsg, setToastMsg] = useState("");

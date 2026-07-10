@@ -2789,28 +2789,66 @@ export default function EditorPage() {
         transition: "background 0.2s",
       }} className="hide-scrollbar">
 
-        {isPdfLoaded && showToolTips && (
+        {isPdfLoaded && (showToolTips || showToast) && (
           <div style={{
             position: "absolute",
             top: "10px",
             left: "50%",
             transform: "translateX(-50%)",
-            zIndex: 20,
+            zIndex: 120,
             pointerEvents: "none",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "8px",
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", minHeight: "16px" }}>
-              <span style={{
-                fontSize: "11px",
-                color: c.docMuted,
+            {showToolTips && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                minHeight: "16px",
+                maxWidth: "320px",
+                padding: "6px 12px",
+                borderRadius: "999px",
+                background: "rgba(255,255,255,0.82)",
+                border: `1px solid ${c.panelBorder}`,
+                boxShadow: "0 8px 18px rgba(0,0,0,0.08)",
+                backdropFilter: "blur(8px)",
+              }}>
+                <span style={{
+                  fontSize: "11px",
+                  color: c.docMuted,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  lineHeight: 1.1,
+                }}>
+                  {toolTipText}
+                </span>
+              </div>
+            )}
+            {showToast && (
+              <div style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                maxWidth: "320px",
+                padding: "10px 16px",
+                borderRadius: "999px",
+                background: "#E5D4FF",
+                color: "#5E5D6A",
+                fontSize: "12px",
+                fontWeight: 700,
+                fontFamily: "'Instrument Sans',sans-serif",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.18)",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
-                lineHeight: 1.1,
-                background: "transparent",
               }}>
-                {toolTipText}
-              </span>
-            </div>
+                {toastMsg}
+              </div>
+            )}
           </div>
         )}
 
@@ -3585,21 +3623,7 @@ export default function EditorPage() {
       )}
 
       {/* ── TOAST ── */}
-      <div style={{
-        position: "fixed",
-        top: "76px",
-        left: "50%",
-        transform: showToast ? "translateX(-50%) translateY(0)" : "translateX(-50%) translateY(-10px)",
-        background: "#E5D4FF", color: "#5E5D6A",
-        padding: "11px 22px", borderRadius: "40px",
-        fontSize: "12px", fontWeight: 700, fontFamily: "'Instrument Sans',sans-serif",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.3)", zIndex: 120,
-        opacity: showToast ? 1 : 0,
-        pointerEvents: "none",
-        transition: "opacity 0.25s, transform 0.25s",
-      }}>
-        {toastMsg}
-      </div>
+      {/* Toast rendered with the top notification stack */}
     </div>
   );
 }

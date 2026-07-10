@@ -13,7 +13,6 @@ interface BeforeInstallPromptEvent extends Event {
 export default function Home() {
   const [toastMsg, setToastMsg] = useState("");
   const [showToast, setShowToast] = useState(false);
-  const [showCookie, setShowCookie] = useState(true);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
 
@@ -99,7 +98,7 @@ export default function Home() {
             )}
             <Link href="/editor" className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#E5D4FF] text-[#5E5D6A] hover:bg-[#F9D5E5] font-bold text-xs rounded-full transition-all shadow-xs">
               <FolderOpen className="w-3.5 h-3.5" />
-              Browse files
+              Getting started
             </Link>
           </div>
         </div>
@@ -133,7 +132,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Link href="/editor" className="inline-flex items-center gap-2 px-7 py-3.5 bg-[#E5D4FF] text-[#5E5D6A] hover:bg-[#F9D5E5] font-bold text-sm rounded-full transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.01] motion-hover-lift">
                 <ArrowUpRight className="w-4 h-4" />
-                Blank page
+                Getting started
               </Link>
               <a href="#features" className="inline-flex items-center gap-2 px-7 py-3.5 bg-white/72 backdrop-blur-md text-[#5E5D6A] hover:bg-white font-bold text-sm rounded-full transition-all shadow-sm border border-white/70 hover:scale-[1.01] motion-hover-lift">
                 Explore features
@@ -260,21 +259,6 @@ export default function Home() {
         <Check className="w-4 h-4 text-mint stroke-[2.5]" />
         <span>{toastMsg}</span>
       </div>
-
-      {/* DUNA COOKIE BANNER COMPONENT */}
-      {showCookie && (
-        <div className="fixed bottom-6 right-6 md:right-12 bg-white/88 backdrop-blur-md border border-[#ECEAF3] p-4.5 rounded-2xl shadow-lg z-50 max-w-sm flex items-center justify-between gap-6 transition-all duration-300">
-          <p className="text-xs text-charcoal-light leading-relaxed">
-            We use cookies to personalize content, run ads, and analyze traffic.
-          </p>
-          <button 
-            onClick={() => setShowCookie(false)}
-            className="px-4 py-1.5 bg-charcoal hover:bg-charcoal/90 text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer"
-          >
-            Okay
-          </button>
-        </div>
-      )}
 
     </div>
   );

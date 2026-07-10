@@ -2807,10 +2807,17 @@ export default function EditorPage() {
                     setTextAnnotations(prev => prev.map(t => t.id === annotation.id ? { ...t, text: nextValue } : t));
                   }}
                   onBlur={e => finishTextEdit(annotation.id, e.currentTarget.value)}
+                  onPointerDown={e => e.stopPropagation()}
                   onKeyDown={e => {
                     if (e.key === "Escape") {
                       e.preventDefault();
                       setEditingTextId(null);
+                      setSelectedObject({ kind: "text", id: annotation.id });
+                      return;
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      finishTextEdit(annotation.id, e.currentTarget.value);
                     }
                   }}
                   onInput={e => {

@@ -368,6 +368,7 @@ function TextDropdown<T extends string | number>({
       </button>
       {open && typeof document !== "undefined" && createPortal(
         <div
+          data-text-toolbar
           style={{
             position: "fixed",
             top: anchor.top,

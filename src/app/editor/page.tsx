@@ -392,8 +392,9 @@ function TextDropdown<T extends string | number>({
               <button
                 key={String(option)}
                 type="button"
-                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={() => {
+                onMouseDown={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   onChange(option);
                   setOpen(false);
                 }}

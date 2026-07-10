@@ -1910,6 +1910,20 @@ export default function EditorPage() {
     </button>
   );
 
+  const activeShape = isShapeTool(activeTool) ? activeTool : null;
+  const activeShapeLabel = activeShape
+    ? ({ rect: "Rect", ellipse: "Ellipse", diamond: "Diamond", line: "Line", arrow: "Arrow" } as Record<ShapeTool, string>)[activeShape]
+    : "Shapes";
+  const activeShapeIcon = activeShape
+    ? ({
+        rect: <Square size={14} />,
+        ellipse: <Circle size={14} />,
+        diamond: <Diamond size={14} />,
+        line: <Minus size={14} />,
+        arrow: <ArrowRight size={14} />,
+      } as Record<ShapeTool, React.ReactNode>)[activeShape]
+    : <Square size={20} />;
+
   const pageDockBtnStyle = (theme: typeof c, active = false): React.CSSProperties => ({
     width: "34px",
     height: "34px",
@@ -2204,9 +2218,9 @@ export default function EditorPage() {
               }}
             >
               <div style={{ width: "22px", height: "22px" }}>
-                <Square size={20} />
+                {activeShapeIcon}
               </div>
-              <span>Shapes</span>
+              <span>{activeShapeLabel}</span>
             </button>
             {showShapeMenu && (
               <div style={{

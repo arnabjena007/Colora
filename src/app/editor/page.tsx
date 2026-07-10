@@ -2211,8 +2211,9 @@ export default function EditorPage() {
   });
 
   const currentTextAlign = (): "left" | "center" | "right" => {
-    if (selectedObject?.kind === "text") {
-      return textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current;
+    const targetId = editingTextId ?? (selectedObject?.kind === "text" ? selectedObject.id : null);
+    if (targetId) {
+      return textAnnotations.find(t => t.id === targetId)?.align ?? textAlignRef.current;
     }
     return textAlignRef.current;
   };
@@ -2365,7 +2366,7 @@ export default function EditorPage() {
               <option key={size} value={size}>{size}</option>
             ))}
           </select>
-          {(activeTool === "text" || activeTool === "signature") && (
+          {((activeTool === "text" || activeTool === "signature") || selectedObject?.kind === "text" || editingTextId) && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <TextDropdown

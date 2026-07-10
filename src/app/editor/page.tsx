@@ -1977,6 +1977,13 @@ export default function EditorPage() {
     cursor: "pointer",
   });
 
+  const currentTextAlign = (): "left" | "center" | "right" => {
+    if (selectedObject?.kind === "text") {
+      return textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current;
+    }
+    return textAlignRef.current;
+  };
+
   const alignBtnStyle = (active: boolean): React.CSSProperties => ({
     width: "30px",
     height: "30px",
@@ -2142,13 +2149,13 @@ export default function EditorPage() {
                 ))}
               </select>
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <button onClick={() => setTextAlign("left")} title="Align left" style={alignBtnStyle((selectedObject?.kind === "text" && textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current) === "left")}>
+                <button onClick={() => setTextAlign("left")} title="Align left" style={alignBtnStyle(currentTextAlign() === "left")}>
                   <AlignLeft size={14} />
                 </button>
-                <button onClick={() => setTextAlign("center")} title="Align center" style={alignBtnStyle((selectedObject?.kind === "text" && textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current) === "center")}>
+                <button onClick={() => setTextAlign("center")} title="Align center" style={alignBtnStyle(currentTextAlign() === "center")}>
                   <AlignCenter size={14} />
                 </button>
-                <button onClick={() => setTextAlign("right")} title="Align right" style={alignBtnStyle((selectedObject?.kind === "text" && textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current) === "right")}>
+                <button onClick={() => setTextAlign("right")} title="Align right" style={alignBtnStyle(currentTextAlign() === "right")}>
                   <AlignRight size={14} />
                 </button>
               </div>

@@ -3586,13 +3586,15 @@ export default function EditorPage() {
 
       {/* ── TOAST ── */}
       <div style={{
-        position: "fixed", bottom: "84px", right: "24px",
+        position: "fixed",
+        top: "76px",
+        left: "50%",
+        transform: showToast ? "translateX(-50%) translateY(0)" : "translateX(-50%) translateY(-10px)",
         background: "#E5D4FF", color: "#5E5D6A",
         padding: "11px 22px", borderRadius: "40px",
         fontSize: "12px", fontWeight: 700, fontFamily: "'Instrument Sans',sans-serif",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.3)", zIndex: 100,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.3)", zIndex: 120,
         opacity: showToast ? 1 : 0,
-        transform: showToast ? "translateY(0)" : "translateY(12px)",
         pointerEvents: "none",
         transition: "opacity 0.25s, transform 0.25s",
       }}>

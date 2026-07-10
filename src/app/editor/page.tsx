@@ -9,7 +9,8 @@ import {
   Download, Undo2, Redo2, FolderOpen, X,
   ChevronLeft, ChevronRight, Sun, Moon, Home, Eraser,
   ZoomIn, ZoomOut, Trash2, FilePlus2, Files, Hash, PenLine,
-  Hand, ArrowRight, Minus, Circle, Diamond, Plus, ImageIcon
+  Hand, ArrowRight, Minus, Circle, Diamond, Plus, ImageIcon,
+  AlignLeft, AlignCenter, AlignRight
 } from "lucide-react";
 
 interface NoteItem {
@@ -27,6 +28,7 @@ interface TextAnnotationItem {
   fontSize: number;
   lineHeight: number;
   color: string;
+  align?: "left" | "center" | "right";
 }
 
 interface PictureItem {
@@ -329,6 +331,9 @@ export default function EditorPage() {
   const [signatureText, setSignatureText] = useState("");
   const [textFontSize, setTextFontSize] = useState(18);
   const [textLineHeight, setTextLineHeight] = useState(1.35);
+  const [showBrushWidthMenu, setShowBrushWidthMenu] = useState(false);
+  const [showTextSizeMenu, setShowTextSizeMenu] = useState(false);
+  const [showTextSpaceMenu, setShowTextSpaceMenu] = useState(false);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [showShapeMenu, setShowShapeMenu] = useState(false);
   const [selectedObject, setSelectedObject] = useState<SelectedObject | null>(null);
@@ -360,6 +365,7 @@ export default function EditorPage() {
   const activeToolRef = useRef("select");
   const activeColorRef = useRef(DEFAULT_HIGHLIGHT_COLOR);
   const brushWidthRef = useRef(22);
+  const textAlignRef = useRef<"left" | "center" | "right">("left");
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const textLayerInstanceRef = useRef<PdfTextLayer | null>(null);
   const pageStoreRef = useRef<Map<number, PageState>>(new Map());
@@ -396,6 +402,7 @@ export default function EditorPage() {
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { activeColorRef.current = activeColor; }, [activeColor]);
   useEffect(() => { brushWidthRef.current = brushWidth; }, [brushWidth]);
+  useEffect(() => { textAlignRef.current = "left"; }, []);
   useEffect(() => { notesRef.current = notes; }, [notes]);
   useEffect(() => { textAnnotationsRef.current = textAnnotations; }, [textAnnotations]);
   useEffect(() => { picturesRef.current = pictures; }, [pictures]);
@@ -1024,6 +1031,7 @@ export default function EditorPage() {
       fontSize: textFontSize,
       lineHeight: textLineHeight,
       color: activeColorRef.current,
+      align: textAlignRef.current,
     }]);
     setEditingTextId(id);
     saveState();
@@ -1082,6 +1090,13 @@ export default function EditorPage() {
     setActiveColor(annotation.color);
     activeColorRef.current = annotation.color;
     setEditingTextId(annotation.id);
+  };
+
+  const setTextAlign = (align: "left" | "center" | "right") => {
+    textAlignRef.current = align;
+    if (editingTextId) {
+      setTextAnnotations(prev => prev.map(t => t.id === editingTextId ? { ...t, align } : t));
+    }
   };
 
   const onDocumentMouseDownCapture = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1461,12 +1476,18 @@ export default function EditorPage() {
       ctx.fillStyle = annotation.color ?? TEXT_COLOR;
       ctx.font = `${annotation.fontSize * scaleY}px 'Excalifont', 'Instrument Sans', Arial, sans-serif`;
       ctx.textBaseline = "top";
+      ctx.textAlign = annotation.align ?? "left";
       const maxWidth = Math.max(80, (pageState.canvasWidth - annotation.x - 24) * scaleX);
       const lines = wrapTextLines(ctx, annotation.text, maxWidth);
+      const xBase = annotation.align === "center"
+        ? annotation.x * scaleX + maxWidth / 2 + 6 * scaleX
+        : annotation.align === "right"
+          ? annotation.x * scaleX + maxWidth + 6 * scaleX
+          : annotation.x * scaleX + 6 * scaleX;
       lines.forEach((line, index) => {
         ctx.fillText(
           line,
-          annotation.x * scaleX + 6 * scaleX,
+          xBase,
           annotation.y * scaleY + 4 * scaleY + index * annotation.fontSize * annotation.lineHeight * scaleY
         );
       });
@@ -1941,6 +1962,34 @@ export default function EditorPage() {
     </button>
   );
 
+  const compactSelectStyle = (width: string): React.CSSProperties => ({
+    width,
+    height: "30px",
+    borderRadius: "10px",
+    border: `1px solid ${c.headerBorder}`,
+    background: dm ? "#171B24" : "#FFFFFF",
+    color: c.docText,
+    fontFamily: "inherit",
+    fontSize: "11px",
+    fontWeight: 800,
+    padding: "0 10px",
+    outline: "none",
+    cursor: "pointer",
+  });
+
+  const alignBtnStyle = (active: boolean): React.CSSProperties => ({
+    width: "30px",
+    height: "30px",
+    borderRadius: "10px",
+    border: "none",
+    background: active ? c.toolActive : "transparent",
+    color: active ? c.toolActiveTxt : c.docMuted,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  });
+
   const activeShape = isShapeTool(activeTool) ? activeTool : null;
   const activeShapeLabel = activeShape
     ? ({ rect: "Rect", ellipse: "Ellipse", diamond: "Diamond", line: "Line", arrow: "Arrow" } as Record<ShapeTool, string>)[activeShape]
@@ -2054,42 +2103,55 @@ export default function EditorPage() {
             ))}
           </div>
           <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-          <input
-            type="range"
-            min={activeTool === "pencil" ? 1 : 8}
-            max={activeTool === "pencil" ? 16 : 48}
+          <select
             value={brushWidth}
-            onChange={e => { const v = +e.target.value; setBrushWidth(v); brushWidthRef.current = v; }}
-            title={`Size ${brushWidth}`}
-            style={{ width: "96px", accentColor: "#E5D4FF", cursor: "pointer" }}
-          />
-          <span style={{ fontSize: "11px", fontWeight: 800, color: c.docMuted, width: "22px", textAlign: "center" }}>{brushWidth}</span>
+            onChange={e => {
+              const v = +e.target.value;
+              setBrushWidth(v);
+              brushWidthRef.current = v;
+              setShowBrushWidthMenu(false);
+            }}
+            title="Brush size"
+            style={compactSelectStyle("74px")}
+          >
+            {(activeTool === "pencil" ? [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16] : [8, 12, 16, 20, 24, 28, 32, 40, 48]).map(size => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
           {(activeTool === "text" || activeTool === "signature") && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-              <span style={{ fontSize: "10px", fontWeight: 800, color: c.docMuted }}>Size</span>
-              <input
-                type="range"
-                min={12}
-                max={36}
+              <select
                 value={textFontSize}
                 onChange={e => setTextFontSize(+e.target.value)}
-                title={`Font size ${textFontSize}`}
-                style={{ width: "88px", accentColor: "#E5D4FF", cursor: "pointer" }}
-              />
-              <span style={{ fontSize: "11px", fontWeight: 800, color: c.docMuted, width: "20px", textAlign: "center" }}>{textFontSize}</span>
-              <span style={{ fontSize: "10px", fontWeight: 800, color: c.docMuted }}>Space</span>
-              <input
-                type="range"
-                min={1.05}
-                max={2.2}
-                step={0.05}
+                title="Font size"
+                style={compactSelectStyle("74px")}
+              >
+                {[12, 14, 16, 18, 20, 22, 24, 28, 32, 36].map(size => (
+                  <option key={size} value={size}>{size}px</option>
+                ))}
+              </select>
+              <select
                 value={textLineHeight}
                 onChange={e => setTextLineHeight(+e.target.value)}
-                title={`Line spacing ${textLineHeight.toFixed(2)}`}
-                style={{ width: "88px", accentColor: "#E5D4FF", cursor: "pointer" }}
-              />
-              <span style={{ fontSize: "11px", fontWeight: 800, color: c.docMuted, width: "34px", textAlign: "center" }}>{textLineHeight.toFixed(2)}</span>
+                title="Line spacing"
+                style={compactSelectStyle("82px")}
+              >
+                {[1.05, 1.15, 1.25, 1.35, 1.5, 1.65, 1.8, 2].map(space => (
+                  <option key={space} value={space}>{space.toFixed(2)}</option>
+                ))}
+              </select>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <button onClick={() => setTextAlign("left")} title="Align left" style={alignBtnStyle((selectedObject?.kind === "text" && textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current) === "left")}>
+                  <AlignLeft size={14} />
+                </button>
+                <button onClick={() => setTextAlign("center")} title="Align center" style={alignBtnStyle((selectedObject?.kind === "text" && textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current) === "center")}>
+                  <AlignCenter size={14} />
+                </button>
+                <button onClick={() => setTextAlign("right")} title="Align right" style={alignBtnStyle((selectedObject?.kind === "text" && textAnnotations.find(t => t.id === selectedObject.id)?.align ?? textAlignRef.current) === "right")}>
+                  <AlignRight size={14} />
+                </button>
+              </div>
             </>
           )}
           <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />

@@ -103,7 +103,7 @@ Customize text with:
 
 ## Design
 
-Pastelle is designed to provide a calm editing experience without unnecessary visual clutter.
+Colora is designed to provide a calm editing experience without unnecessary visual clutter.
 
 The interface uses:
 
@@ -137,8 +137,3 @@ Colora is built around three ideas:
 - A clean interface that stays out of the way
 - A polished visual style suitable for everyday work, screenshots, and presentations
 
----
-
-## One Line Summary
-
-Pastelle is a soft, modern PDF annotation app built for clean editing, quick markup, and a polished user experience.

@@ -22,6 +22,12 @@ interface NoteItem {
   y: number;
 }
 
+interface TextHighlightRange {
+  start: number;
+  end: number;
+  color: string;
+}
+
 interface TextAnnotationItem {
   id: string;
   text: string;
@@ -35,6 +41,8 @@ interface TextAnnotationItem {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  highlights?: TextHighlightRange[];
+  highlightColor?: string;
 }
 
 interface PictureItem {
@@ -268,6 +276,119 @@ const renderInlineFormattedText = (text: string, style?: ListStyle) => {
 
   if (!nodes.length) return rendered;
   if (lastIndex < rendered.length) nodes.push(rendered.slice(lastIndex));
+  return nodes;
+};
+
+const visibleIndexToRawIndex = (text: string, visibleIndex: number) => {
+  let visible = 0;
+  for (let raw = 0; raw < text.length; raw += 1) {
+    if (text.slice(raw, raw + 2) === "**") {
+      raw += 1;
+      continue;
+    }
+    if (visible >= visibleIndex) return raw;
+    visible += 1;
+  }
+  return text.length;
+};
+
+const selectedTextOffsetsInElement = (root: HTMLElement, range: Range) => {
+  let total = 0;
+  let start: number | null = null;
+  let end: number | null = null;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let current = walk.nextNode();
+
+  while (current) {
+    const textLength = current.textContent?.length ?? 0;
+    if (textLength > 0 && range.intersectsNode(current)) {
+      const localStart = current === range.startContainer ? range.startOffset : 0;
+      const localEnd = current === range.endContainer ? range.endOffset : textLength;
+      const nextStart = total + Math.max(0, Math.min(textLength, localStart));
+      const nextEnd = total + Math.max(0, Math.min(textLength, localEnd));
+      start = start === null ? nextStart : Math.min(start, nextStart);
+      end = end === null ? nextEnd : Math.max(end, nextEnd);
+    }
+    total += textLength;
+    current = walk.nextNode();
+  }
+
+  return start === null || end === null ? null : { start, end };
+};
+
+const mergeHighlightRanges = (ranges: TextHighlightRange[] = [], next: TextHighlightRange) => {
+  const normalized = [
+    ...ranges.filter(range => range.end <= next.start || range.start >= next.end),
+    next,
+  ]
+    .filter(range => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+  const merged: TextHighlightRange[] = [];
+
+  normalized.forEach(range => {
+    const last = merged[merged.length - 1];
+    if (last && last.color === range.color && range.start <= last.end) {
+      last.end = Math.max(last.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  });
+
+  return merged;
+};
+
+const highlightMarkerStyle = (color: string): React.CSSProperties => ({
+  display: "inline",
+  padding: "0.05em 0.42em 0.17em",
+  borderRadius: "0.35em 0.85em 0.42em 0.78em",
+  transform: "rotate(-3.2deg) skewX(-6deg)",
+  transformOrigin: "left center",
+  background: `
+    linear-gradient(164deg, ${hexToRgba(color, 0)} 0%, ${hexToRgba(color, 0.18)} 13%, ${hexToRgba(color, 0.02)} 88%, ${hexToRgba(color, 0)} 100%),
+    linear-gradient(171deg, ${hexToRgba(color, 0.22)} 5%, ${hexToRgba(color, 0.43)} 48%, ${hexToRgba(color, 0.26)} 94%)
+  `,
+  boxShadow: `
+    inset -10px 2px 0 ${hexToRgba(color, 0.05)},
+    inset 8px -2px 0 ${hexToRgba(color, 0.08)},
+    0 0 0 1px ${hexToRgba(color, 0.06)}
+  `,
+  boxDecorationBreak: "clone",
+  WebkitBoxDecorationBreak: "clone",
+  filter: "saturate(1.04)",
+});
+
+const renderHighlightedFormattedText = (
+  text: string,
+  style?: ListStyle,
+  highlights: TextHighlightRange[] = []
+) => {
+  const cleanRanges = highlights
+    .filter(range => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+
+  if (!cleanRanges.length) return renderInlineFormattedText(text, style);
+  if (style && style !== "none") return renderInlineFormattedText(text, style);
+
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  cleanRanges.forEach((range, index) => {
+    const start = Math.max(0, Math.min(text.length, range.start));
+    const end = Math.max(start, Math.min(text.length, range.end));
+    if (start > cursor) {
+      nodes.push(<React.Fragment key={`plain-${index}`}>{renderInlineFormattedText(text.slice(cursor, start))}</React.Fragment>);
+    }
+    nodes.push(
+      <span key={`highlight-${index}`} style={highlightMarkerStyle(range.color)}>
+        {renderInlineFormattedText(text.slice(start, end))}
+      </span>
+    );
+    cursor = end;
+  });
+
+  if (cursor < text.length) {
+    nodes.push(<React.Fragment key="plain-tail">{renderInlineFormattedText(text.slice(cursor))}</React.Fragment>);
+  }
+
   return nodes;
 };
 
@@ -1751,10 +1872,19 @@ export default function EditorPage() {
       const textHost = ancestorElement?.closest?.(".text-annotation-item") as HTMLElement | null;
       const textId = textHost?.dataset?.textId;
       if (textId) {
+        const offsets = selectedTextOffsetsInElement(textHost, range);
+        if (!offsets || offsets.start === offsets.end) return;
         setTextAnnotations(prev =>
-          prev.map(t =>
-            t.id === textId ? ({ ...t, highlightColor: activeColorRef.current } as any) : t
-          )
+          prev.map(t => {
+            if (t.id !== textId) return t;
+            const start = visibleIndexToRawIndex(t.text, Math.min(offsets.start, offsets.end));
+            const end = visibleIndexToRawIndex(t.text, Math.max(offsets.start, offsets.end));
+            return {
+              ...t,
+              highlightColor: undefined,
+              highlights: mergeHighlightRanges(t.highlights, { start, end, color: activeColorRef.current }),
+            };
+          })
         );
         saveState();
         sel.removeAllRanges();
@@ -3456,33 +3586,7 @@ export default function EditorPage() {
                 }}
               >
                 <div style={{ position: "relative", zIndex: 1 }}>
-                  {(annotation as any).highlightColor ? (
-                    <span
-                      style={{
-                        display: "inline",
-                        padding: "0.05em 0.42em 0.17em",
-                        borderRadius: "0.35em 0.85em 0.42em 0.78em",
-                        transform: "rotate(-3.2deg) skewX(-6deg)",
-                        transformOrigin: "left center",
-                        background: `
-                          linear-gradient(164deg, ${hexToRgba((annotation as any).highlightColor, 0)} 0%, ${hexToRgba((annotation as any).highlightColor, 0.18)} 13%, ${hexToRgba((annotation as any).highlightColor, 0.02)} 88%, ${hexToRgba((annotation as any).highlightColor, 0)} 100%),
-                          linear-gradient(171deg, ${hexToRgba((annotation as any).highlightColor, 0.22)} 5%, ${hexToRgba((annotation as any).highlightColor, 0.43)} 48%, ${hexToRgba((annotation as any).highlightColor, 0.26)} 94%)
-                        `,
-                        boxShadow: `
-                          inset -10px 2px 0 ${hexToRgba((annotation as any).highlightColor, 0.05)},
-                          inset 8px -2px 0 ${hexToRgba((annotation as any).highlightColor, 0.08)},
-                          0 0 0 1px ${hexToRgba((annotation as any).highlightColor, 0.06)}
-                        `,
-                        boxDecorationBreak: "clone",
-                        WebkitBoxDecorationBreak: "clone",
-                        filter: "saturate(1.04)",
-                      }}
-                    >
-                      {renderInlineFormattedText(annotation.text, annotation.listStyle)}
-                    </span>
-                  ) : (
-                    renderInlineFormattedText(annotation.text, annotation.listStyle)
-                  )}
+                  {renderHighlightedFormattedText(annotation.text, annotation.listStyle, annotation.highlights)}
                 </div>
               </div>
             );

@@ -8,10 +8,11 @@ import type { Options as RoughOptions } from "roughjs/bin/core";
 import {
   Highlighter, Pencil, Type, MessageSquare, Square,
   Download, Undo2, Redo2, FolderOpen, X,
-  ChevronLeft, ChevronRight, Sun, Moon, Home, Eraser,
+  ChevronLeft, ChevronRight, Sun, Moon, Home,
   ZoomIn, ZoomOut, Trash2, FilePlus2, Files, Hash, PenLine,
   Hand, ArrowRight, Minus, Circle, Diamond, ImageIcon, CircleHelp,
-  AlignLeft, AlignCenter, AlignRight, Bold, Italic, Underline
+  AlignLeft, AlignCenter, AlignRight, Bold, Italic, Underline,
+  List, ListOrdered
 } from "lucide-react";
 
 interface NoteItem {
@@ -179,6 +180,97 @@ const SHAPE_TOOLS = new Set<string>(["rect", "ellipse", "diamond", "line", "arro
 
 const isShapeTool = (tool: string): tool is ShapeTool => SHAPE_TOOLS.has(tool);
 
+function EraserTrailIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 17.5c3.6 2.1 7.3 2.1 11.2.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.45" />
+      <path d="M7.1 12.4 13.5 6a2.1 2.1 0 0 1 3 0l1.5 1.5a2.1 2.1 0 0 1 0 3l-6.4 6.4a2.4 2.4 0 0 1-1.7.7H6.8a1.1 1.1 0 0 1-1.1-1.1v-2.4c0-.6.2-1.2.7-1.7Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m11.2 8.3 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BlankPageIcon({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7 4.5h6.5L17.5 8V18a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 18V6A1.5 1.5 0 0 1 7 4.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M13.5 4.5V8H17.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 11.8h7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.55" />
+      <path d="M8 14.6h5.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.35" />
+    </svg>
+  );
+}
+
+function LocalUploadIcon({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.5 14.5v3A1.5 1.5 0 0 0 7 19h10a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M8.5 11.5 12 8l3.5 3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 8v7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M6.5 6.5h3l1.4-1.7h2.6l1.4 1.7h3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" />
+    </svg>
+  );
+}
+
+const stripListMarkers = (text: string) =>
+  text
+    .split("\n")
+    .map(line => line.replace(/^(\s*)(?:•\s+|\d+\.\s+|[A-Z]\.\s+)/, "$1"))
+    .join("\n");
+
+const listMarkerFor = (style: ListStyle, index: number) => {
+  if (style === "bullet") return "• ";
+  if (style === "number") return `${index + 1}. `;
+  if (style === "alpha") return `${String.fromCharCode(65 + (index % 26))}. `;
+  return "";
+};
+
+const applyListStyleToText = (text: string, style: ListStyle) => {
+  const clean = stripListMarkers(text);
+  if (style === "none") return clean;
+  if (!clean.trim()) return listMarkerFor(style, 0);
+  let itemIndex = 0;
+  return clean
+    .split("\n")
+    .map(line => {
+      if (!line.trim()) return line;
+      const next = `${listMarkerFor(style, itemIndex)}${line.trimStart()}`;
+      itemIndex += 1;
+      return next;
+    })
+    .join("\n");
+};
+
+const textHasListMarker = (text: string) =>
+  text.split("\n").some(line => /^(?:\s*)(?:•\s+|\d+\.\s+|[A-Z]\.\s+)/.test(line));
+
+const displayTextForListStyle = (text: string, style?: ListStyle) => {
+  if (!style || style === "none" || textHasListMarker(text)) return text || " ";
+  return applyListStyleToText(text, style) || " ";
+};
+
+const renderInlineFormattedText = (text: string, style?: ListStyle) => {
+  const rendered = displayTextForListStyle(text, style);
+  const boldRe = /\*\*([\s\S]+?)\*\*/g;
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = boldRe.exec(rendered)) !== null) {
+    if (match.index > lastIndex) nodes.push(rendered.slice(lastIndex, match.index));
+    nodes.push(
+      <span key={`${match.index}-b`} style={{ fontWeight: 800 }}>
+        {match[1]}
+      </span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (!nodes.length) return rendered;
+  if (lastIndex < rendered.length) nodes.push(rendered.slice(lastIndex));
+  return nodes;
+};
+
 const roughSeed = (...values: number[]) => {
   const raw = values.reduce((acc, value, index) => acc + Math.round(value) * (index + 11), 97);
   return Math.max(1, Math.abs(raw) % 2147483647);
@@ -186,6 +278,18 @@ const roughSeed = (...values: number[]) => {
 
 const toShapeFill = (hex: string, alpha: number) => {
   if (!hex || hex === NO_FILL) return undefined;
+  const safe = hex.replace("#", "");
+  const normalized = safe.length === 3 ? safe.split("").map(ch => ch + ch).join("") : safe;
+  const value = Number.parseInt(normalized, 16);
+  if (Number.isNaN(value) || normalized.length !== 6) return hex;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const hexToRgba = (hex: string, alpha: number) => {
+  if (!hex) return `rgba(229, 212, 255, ${alpha})`;
   const safe = hex.replace("#", "");
   const normalized = safe.length === 3 ? safe.split("").map(ch => ch + ch).join("") : safe;
   const value = Number.parseInt(normalized, 16);
@@ -273,6 +377,51 @@ function drawRoughShape(
   ctx.restore();
 }
 
+function drawNaturalHighlightRects(
+  ctx: CanvasRenderingContext2D,
+  rects: DOMRectList,
+  containerRect: DOMRect,
+  scaleX: number,
+  scaleY: number,
+  color: string,
+) {
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = color;
+
+  for (let i = 0; i < rects.length; i++) {
+    const rect = rects[i];
+    if (rect.width < 2 || rect.height < 2) continue;
+
+    const x = (rect.left - containerRect.left - 2) * scaleX;
+    const y = (rect.top - containerRect.top + rect.height * 0.12) * scaleY;
+    const w = (rect.width + 4) * scaleX;
+    const h = Math.max(8, (rect.height + 5) * scaleY);
+    const tilt = ((i % 2 === 0 ? -1 : 1) * Math.min(5, Math.max(2, w * 0.018))) * scaleX;
+    const wobble = Math.min(2.2, Math.max(0.8, h * 0.08));
+
+    ctx.globalAlpha = 0.34;
+    ctx.beginPath();
+    ctx.moveTo(x + tilt, y + wobble);
+    ctx.lineTo(x + w + tilt * 0.35, y - wobble);
+    ctx.lineTo(x + w - tilt, y + h + wobble);
+    ctx.lineTo(x - tilt * 0.4, y + h - wobble);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath();
+    ctx.moveTo(x + 1 - tilt * 0.2, y + h * 0.24);
+    ctx.lineTo(x + w - 1 + tilt * 0.2, y + h * 0.08);
+    ctx.lineTo(x + w - 2 - tilt * 0.2, y + h * 0.72);
+    ctx.lineTo(x + 2 + tilt * 0.2, y + h * 0.86);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 type TextDropdownProps<T extends string | number> = {
   value: T;
   width: string;
@@ -332,14 +481,14 @@ function TextDropdown<T extends string | number>({
 
   const buttonStyle: React.CSSProperties = {
     width,
-    height: "24px",
-    borderRadius: "8px",
+    height: "30px",
+    borderRadius: "10px",
     border: `1px solid ${theme.headerBorder}`,
     color: theme.docText,
     fontFamily: "inherit",
-    fontSize: "9px",
+    fontSize: "11px",
     fontWeight: 800,
-    padding: "0 6px 0 8px",
+    padding: "0 10px",
     outline: "none",
     cursor: "pointer",
     display: "inline-flex",
@@ -401,10 +550,10 @@ function TextDropdown<T extends string | number>({
                   background: selected ? theme.toolActive : "transparent",
                   color: selected ? theme.toolActiveTxt : theme.docText,
                   borderRadius: "7px",
-                  padding: "5px 7px",
+                  padding: "7px 9px",
                   textAlign: "left",
                   fontFamily: "inherit",
-                  fontSize: "9px",
+                  fontSize: "11px",
                   fontWeight: 700,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
@@ -1120,6 +1269,80 @@ export default function EditorPage() {
     );
   };
 
+  const eraseObjectsAtPoint = useCallback((x: number, y: number, radius: number) => {
+    const container = containerRef.current;
+    const canvas = annotCanvasRef.current;
+    if (!container || !canvas) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const scaleX = canvas.width / containerRect.width;
+    const scaleY = canvas.height / containerRect.height;
+    const circleIntersectsRect = (left: number, top: number, width: number, height: number) => {
+      const nearestX = Math.max(left, Math.min(x, left + width));
+      const nearestY = Math.max(top, Math.min(y, top + height));
+      return Math.hypot(x - nearestX, y - nearestY) <= radius;
+    };
+    const elementHit = (selector: string, fallback: { x: number; y: number; width: number; height: number }) => {
+      const el = container.querySelector<HTMLElement>(selector);
+      if (!el) return circleIntersectsRect(fallback.x, fallback.y, fallback.width, fallback.height);
+      const rect = el.getBoundingClientRect();
+      return circleIntersectsRect(
+        (rect.left - containerRect.left) * scaleX,
+        (rect.top - containerRect.top) * scaleY,
+        rect.width * scaleX,
+        rect.height * scaleY,
+      );
+    };
+
+    const nextText = textAnnotationsRef.current.filter(annotation => {
+      const width = Math.max(80, annotation.fontSize * Math.max(3, annotation.text.length * 0.58));
+      const height = Math.max(38, annotation.fontSize * annotation.lineHeight * Math.max(1, annotation.text.split("\n").length) + 12);
+      return !elementHit(`[data-text-id="${CSS.escape(annotation.id)}"]`, {
+        x: annotation.x,
+        y: annotation.y,
+        width,
+        height,
+      });
+    });
+    if (nextText.length !== textAnnotationsRef.current.length) {
+      textAnnotationsRef.current = nextText;
+      setTextAnnotations(nextText);
+      const selected = selectedObjectRef.current;
+      if (selected?.kind === "text" && !nextText.some(item => item.id === selected.id)) {
+        setSelectedObject(null);
+        selectedObjectRef.current = null;
+        setEditingTextId(null);
+      }
+    }
+
+    const nextNotes = notesRef.current.filter(note => !elementHit(`[data-note-id="${CSS.escape(note.id)}"]`, {
+      x: note.x,
+      y: note.y,
+      width: 190,
+      height: 110,
+    }));
+    if (nextNotes.length !== notesRef.current.length) {
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+      const selected = selectedObjectRef.current;
+      if (selected?.kind === "note" && !nextNotes.some(item => item.id === selected.id)) {
+        setSelectedObject(null);
+        selectedObjectRef.current = null;
+      }
+    }
+
+    const nextPictures = picturesRef.current.filter(picture => !elementHit(`[data-picture-id="${CSS.escape(picture.id)}"]`, picture));
+    if (nextPictures.length !== picturesRef.current.length) {
+      picturesRef.current = nextPictures;
+      setPictures(nextPictures);
+      const selected = selectedObjectRef.current;
+      if (selected?.kind === "picture" && !nextPictures.some(item => item.id === selected.id)) {
+        setSelectedObject(null);
+        selectedObjectRef.current = null;
+      }
+    }
+  }, []);
+
   // ─── CANVAS DRAWING ───────────────────────────────────────────────
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const tool = activeToolRef.current;
@@ -1141,6 +1364,7 @@ export default function EditorPage() {
     shapeStartXRef.current = x; shapeStartYRef.current = y;
 
     saveState();
+    if (tool === "eraser") eraseObjectsAtPoint(x, y, brushWidthRef.current);
   };
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1183,6 +1407,7 @@ export default function EditorPage() {
       ctx.arc(cx, cy, width, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      eraseObjectsAtPoint(cx, cy, width);
     } else if (isShapeTool(tool)) {
       // Redraw from pre-drag snapshot then draw current shape
       if (undoListRef.current.length) {
@@ -1307,6 +1532,7 @@ export default function EditorPage() {
 
   const onTextPointerDown = (annotation: TextAnnotationItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (activeToolRef.current === "highlighter") return;
     const isSelected = selectedObjectRef.current?.kind === "text" && selectedObjectRef.current.id === annotation.id;
     if (!isSelected || activeToolRef.current !== "select") {
       setSelectedObject({ kind: "text", id: annotation.id });
@@ -1345,6 +1571,31 @@ export default function EditorPage() {
   };
 
   const setTextStyle = (key: "bold" | "italic" | "underline", value: boolean) => {
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (key === "bold" && targetId) {
+      const input = document.querySelector<HTMLTextAreaElement>(`.text-annotation-input[data-text-id="${CSS.escape(targetId)}"]`);
+      const selectionStart = input?.selectionStart ?? null;
+      const selectionEnd = input?.selectionEnd ?? null;
+      if (input && selectionStart !== null && selectionEnd !== null && selectionStart !== selectionEnd) {
+        const raw = input.value;
+        const hasBoldMarkers =
+          raw.slice(Math.max(0, selectionStart - 2), selectionStart) === "**" &&
+          raw.slice(selectionEnd, selectionEnd + 2) === "**";
+        const nextText = hasBoldMarkers
+          ? `${raw.slice(0, selectionStart - 2)}${raw.slice(selectionStart, selectionEnd)}${raw.slice(selectionEnd + 2)}`
+          : `${raw.slice(0, selectionStart)}**${raw.slice(selectionStart, selectionEnd)}**${raw.slice(selectionEnd)}`;
+        const nextStart = hasBoldMarkers ? Math.max(0, selectionStart - 2) : selectionStart + 2;
+        const nextEnd = hasBoldMarkers ? Math.max(0, selectionEnd - 2) : selectionEnd + 2;
+        setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, text: nextText } : t));
+        requestAnimationFrame(() => {
+          const nextInput = document.querySelector<HTMLTextAreaElement>(`.text-annotation-input[data-text-id="${CSS.escape(targetId)}"]`);
+          if (!nextInput) return;
+          nextInput.focus();
+          nextInput.setSelectionRange(nextStart, nextEnd);
+        });
+        return;
+      }
+    }
     if (key === "bold") {
       setTextBold(value);
       textBoldRef.current = value;
@@ -1357,7 +1608,6 @@ export default function EditorPage() {
       setTextUnderline(value);
       textUnderlineRef.current = value;
     }
-    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (targetId) {
       setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, [key]: value } : t));
     }
@@ -1416,7 +1666,14 @@ export default function EditorPage() {
     setTextListStyleState(listStyle);
     const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
     if (targetId) {
-      setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, listStyle } : t));
+      setTextAnnotations(prev => prev.map(t => t.id === targetId ? { ...t, listStyle, text: applyListStyleToText(t.text, listStyle) } : t));
+      requestAnimationFrame(() => {
+        const input = document.querySelector<HTMLTextAreaElement>(`.text-annotation-input[data-text-id="${CSS.escape(targetId)}"]`);
+        if (!input) return;
+        const nextValue = applyListStyleToText(input.value, listStyle);
+        input.value = nextValue;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
     }
   };
 
@@ -1458,7 +1715,7 @@ export default function EditorPage() {
         setShowTextSpaceMenu(false);
         setShowShapeMenu(false);
         if (!editingTextId) {
-          actions.clearActiveTool();
+          keyboardActionsRef.current.clearActiveTool();
         }
         return;
       }
@@ -1486,6 +1743,23 @@ export default function EditorPage() {
       const range = sel.getRangeAt(0);
       const container = containerRef.current;
       if (!container || !container.contains(range.commonAncestorContainer)) return;
+      const ancestorNode = range.commonAncestorContainer;
+      const ancestorElement =
+        ancestorNode.nodeType === Node.ELEMENT_NODE
+          ? (ancestorNode as HTMLElement)
+          : ancestorNode.parentElement;
+      const textHost = ancestorElement?.closest?.(".text-annotation-item") as HTMLElement | null;
+      const textId = textHost?.dataset?.textId;
+      if (textId) {
+        setTextAnnotations(prev =>
+          prev.map(t =>
+            t.id === textId ? ({ ...t, highlightColor: activeColorRef.current } as any) : t
+          )
+        );
+        saveState();
+        sel.removeAllRanges();
+        return;
+      }
       const rects = range.getClientRects();
       const canvas = annotCanvasRef.current;
       if (!canvas || !rects.length) return;
@@ -1495,20 +1769,7 @@ export default function EditorPage() {
       const scaleX = canvas.width / cr.width;
       const scaleY = canvas.height / cr.height;
       saveState();
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.globalCompositeOperation = "multiply";
-      ctx.fillStyle = activeColorRef.current;
-      for (let i = 0; i < rects.length; i++) {
-        const r = rects[i];
-        ctx.fillRect(
-          (r.left - cr.left) * scaleX,
-          (r.top - cr.top) * scaleY,
-          r.width * scaleX,
-          (r.height + 4) * scaleY
-        );
-      }
-      ctx.restore();
+      drawNaturalHighlightRects(ctx, rects, cr, scaleX, scaleY, activeColorRef.current);
       saveState();
       sel.removeAllRanges();
     };
@@ -2458,9 +2719,35 @@ export default function EditorPage() {
               />
             ))}
           </div>
-          {activeTool === "pencil" && (
+          {(activeTool === "pencil" || activeTool === "eraser") && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
+              {activeTool === "eraser" && (
+                <div
+                  title={`Eraser size: ${brushWidth}px`}
+                  style={{
+                    width: "30px",
+                    height: "30px",
+                    borderRadius: "10px",
+                    border: `1px solid ${c.headerBorder}`,
+                    background: dm ? "#171B24" : "#FFFFFF",
+                    color: c.docMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: `${Math.max(6, Math.min(20, brushWidth / 2))}px`,
+                      height: `${Math.max(6, Math.min(20, brushWidth / 2))}px`,
+                      borderRadius: "50%",
+                      border: `2px solid ${c.docMuted}`,
+                      opacity: 0.72,
+                    }}
+                  />
+                </div>
+              )}
               <select
                 value={brushWidth}
                 onChange={e => {
@@ -2469,10 +2756,10 @@ export default function EditorPage() {
                   brushWidthRef.current = v;
                   setShowBrushWidthMenu(false);
                 }}
-                title="Brush size"
+                title={activeTool === "eraser" ? "Eraser size" : "Brush size"}
                 style={compactSelectStyle("74px")}
               >
-                {[1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16].map(size => (
+                {(activeTool === "eraser" ? [8, 12, 16, 20, 28, 36, 48, 64] : [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16]).map(size => (
                   <option key={size} value={size}>{size}</option>
                 ))}
               </select>
@@ -2483,7 +2770,7 @@ export default function EditorPage() {
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <TextDropdown
                 value={textFontSize}
-                width="66px"
+                width="74px"
                 label="Font size"
                 options={[12, 14, 16, 18, 20, 22, 24, 28, 32, 36]}
                 onChange={setTextFontSizeForCurrent}
@@ -2493,7 +2780,7 @@ export default function EditorPage() {
               />
               <TextDropdown
                 value={textLineHeight}
-                width="72px"
+                width="84px"
                 label="Line spacing"
                 options={[1.05, 1.15, 1.25, 1.35, 1.5, 1.65, 1.8, 2]}
                 onChange={setTextLineHeightForCurrent}
@@ -2513,13 +2800,29 @@ export default function EditorPage() {
                 </button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <TextDropdown
-                value={currentTextListStyle()}
-                width="100px"
-                label="List Style"
-                options={["none", "bullet", "number", "alpha"]}
+                <div
+                  title="List style"
+                  style={{
+                    width: "30px",
+                    height: "30px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: currentTextListStyle() !== "none" ? c.toolActive : "transparent",
+                    color: currentTextListStyle() !== "none" ? c.toolActiveTxt : c.docMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {currentTextListStyle() === "number" ? <ListOrdered size={14} /> : <List size={14} />}
+                </div>
+                <TextDropdown
+                  value={currentTextListStyle()}
+                  width="112px"
+                  label="List Style"
+                  options={["none", "bullet", "number", "alpha"]}
                   onChange={setTextListStyle}
-                  formatOption={style => style === "none" ? "None" : style === "bullet" ? "Bullets" : style === "number" ? "Numbers" : "Alpha"}
+                  formatOption={style => style === "none" ? "No list" : style === "bullet" ? "• Bullets" : style === "number" ? "1. Numbers" : "A. Alpha"}
                   theme={c}
                   darkMode={dm}
                 />
@@ -2776,7 +3079,43 @@ export default function EditorPage() {
           </button>
           {toolBtn("text",        <Type size={sideIconSize} />,        "Text")}
           {toolBtn("signature",   <PenLine size={sideIconSize} />,     "Sign")}
-          {toolBtn("eraser",      <Eraser size={sideIconSize} />,      "Eraser")}
+          <button
+            type="button"
+            onClick={() => selectTool("eraser")}
+            title="Eraser"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "7px",
+              padding: "12px 6px 11px",
+              borderRadius: "16px",
+              width: "100%",
+              border: "none",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+              background: activeTool === "eraser" ? c.toolActive : "transparent",
+              color: activeTool === "eraser" ? c.toolActiveTxt : c.toolInactiveTxt,
+              fontWeight: 800,
+              fontSize: "11px",
+              letterSpacing: "0.02em",
+            }}
+          >
+            <div
+              style={{
+                width: "28px",
+                height: "28px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "10px",
+                background: activeTool === "eraser" ? "rgba(255,255,255,0.28)" : "transparent",
+              }}
+            >
+              <EraserTrailIcon size={22} />
+            </div>
+            <span>Eraser</span>
+          </button>
           {toolBtn("note-btn",    <MessageSquare size={sideIconSize} />, "Note", addNote)}
           </div>
         </div>
@@ -2981,6 +3320,33 @@ export default function EditorPage() {
                       return;
                     }
                     if (e.key === "Enter") {
+                      const style = annotation.listStyle ?? "none";
+                      if (style !== "none") {
+                        e.preventDefault();
+                        const el = e.currentTarget;
+                        const start = el.selectionStart ?? el.value.length;
+                        const end = el.selectionEnd ?? start;
+                        const before = el.value.slice(0, start);
+                        const after = el.value.slice(end);
+                        const itemIndex = before
+                          .split("\n")
+                          .filter(line => stripListMarkers(line).trim().length > 0).length;
+                        const insert = `\n${listMarkerFor(style, itemIndex)}`;
+                        const nextValue = `${before}${insert}${after}`;
+                        setTextAnnotations(prev => prev.map(t => t.id === annotation.id ? { ...t, text: nextValue } : t));
+                        requestAnimationFrame(() => {
+                          const nextPos = start + insert.length;
+                          el.selectionStart = nextPos;
+                          el.selectionEnd = nextPos;
+                          el.style.width = "auto";
+                          el.style.width = `${Math.max(180, el.scrollWidth + 18)}px`;
+                          el.style.height = "auto";
+                          el.style.height = `${Math.max(
+                            annotation.fontSize * annotation.lineHeight + 24,
+                            el.scrollHeight + 4
+                          )}px`;
+                        });
+                      }
                       return;
                     }
                   }}
@@ -3037,9 +3403,11 @@ export default function EditorPage() {
               <div
                 key={annotation.id}
                 className="text-annotation-item"
+                data-text-id={annotation.id}
                 onMouseDown={e => onTextPointerDown(annotation, e)}
                 onClick={e => {
                   e.stopPropagation();
+                  if (activeToolRef.current === "highlighter") return;
                   setActiveTool("select");
                   activeToolRef.current = "select";
                   setSelectedObject({ kind: "text", id: annotation.id });
@@ -3082,18 +3450,40 @@ export default function EditorPage() {
                   boxShadow: selectedObject?.kind === "text" && selectedObject.id === annotation.id
                     ? `0 0 0 1px ${dm ? "rgba(229,212,255,0.7)" : "#E5D4FF"}`
                     : "none",
-                    pointerEvents: activeTool === "select" ? "auto" : "none",
-                  cursor: activeTool === "select" ? "move" : "text",
+                  pointerEvents: activeTool === "select" || activeTool === "highlighter" ? "auto" : "none",
+                  cursor: activeTool === "select" ? "move" : activeTool === "highlighter" ? "text" : "default",
                   userSelect: "text",
                 }}
               >
-                {annotation.listStyle === "bullet"
-                  ? `• ${annotation.text || ""}`
-                  : annotation.listStyle === "number"
-                    ? `1. ${annotation.text || ""}`
-                    : annotation.listStyle === "alpha"
-                      ? `A. ${annotation.text || ""}`
-                      : (annotation.text || " ")}
+                <div style={{ position: "relative", zIndex: 1 }}>
+                  {(annotation as any).highlightColor ? (
+                    <span
+                      style={{
+                        display: "inline",
+                        padding: "0.05em 0.42em 0.17em",
+                        borderRadius: "0.35em 0.85em 0.42em 0.78em",
+                        transform: "rotate(-3.2deg) skewX(-6deg)",
+                        transformOrigin: "left center",
+                        background: `
+                          linear-gradient(164deg, ${hexToRgba((annotation as any).highlightColor, 0)} 0%, ${hexToRgba((annotation as any).highlightColor, 0.18)} 13%, ${hexToRgba((annotation as any).highlightColor, 0.02)} 88%, ${hexToRgba((annotation as any).highlightColor, 0)} 100%),
+                          linear-gradient(171deg, ${hexToRgba((annotation as any).highlightColor, 0.22)} 5%, ${hexToRgba((annotation as any).highlightColor, 0.43)} 48%, ${hexToRgba((annotation as any).highlightColor, 0.26)} 94%)
+                        `,
+                        boxShadow: `
+                          inset -10px 2px 0 ${hexToRgba((annotation as any).highlightColor, 0.05)},
+                          inset 8px -2px 0 ${hexToRgba((annotation as any).highlightColor, 0.08)},
+                          0 0 0 1px ${hexToRgba((annotation as any).highlightColor, 0.06)}
+                        `,
+                        boxDecorationBreak: "clone",
+                        WebkitBoxDecorationBreak: "clone",
+                        filter: "saturate(1.04)",
+                      }}
+                    >
+                      {renderInlineFormattedText(annotation.text, annotation.listStyle)}
+                    </span>
+                  ) : (
+                    renderInlineFormattedText(annotation.text, annotation.listStyle)
+                  )}
+                </div>
               </div>
             );
           })}
@@ -3120,6 +3510,7 @@ export default function EditorPage() {
             <React.Fragment key={picture.id}>
               <div
                 data-picture-hitbox
+                data-picture-id={picture.id}
                 onMouseDown={pictureControlsEnabled ? (e => {
                   e.stopPropagation();
                   const isSelected = selectedObjectRef.current?.kind === "picture" && selectedObjectRef.current.id === picture.id;
@@ -3138,7 +3529,7 @@ export default function EditorPage() {
                   height: picture.height,
                   zIndex: selectedObject?.kind === "picture" && selectedObject.id === picture.id ? 17 : 3,
                   cursor: pictureControlsEnabled ? "grab" : "default",
-                  pointerEvents: "auto",
+                  pointerEvents: activeTool === "eraser" ? "none" : "auto",
                 }}
               >
                 <img
@@ -3253,12 +3644,14 @@ export default function EditorPage() {
           {isPdfLoaded && notes.map(note => (
             <div
               key={note.id}
+              data-note-id={note.id}
               onMouseDown={e => dragNote(note.id, e)}
               onClick={e => { e.stopPropagation(); setSelectedObject({ kind: "note", id: note.id }); }}
               style={{
                 position: "absolute",
                 left: note.x, top: note.y,
                 zIndex: 20, cursor: "grab",
+                pointerEvents: activeTool === "eraser" ? "none" : "auto",
                 filter: selectedObject?.kind === "note" && selectedObject.id === note.id
                   ? "drop-shadow(0 0 0 1px rgba(37,50,74,0.14))"
                   : "none",
@@ -3334,71 +3727,127 @@ export default function EditorPage() {
           ))}
 
           {/* Upload prompt (when no PDF loaded) */}
-          {!isPdfLoaded && (
+        {!isPdfLoaded && (
+          <div style={{
+            position: "relative",
+            zIndex: 5,
+            minHeight: "calc(100dvh - 64px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "40px 28px",
+            color: c.docText,
+            background: `
+              radial-gradient(circle at 50% 0%, rgba(229,212,255,0.32), transparent 28%),
+              radial-gradient(circle at 30% 18%, rgba(214,239,255,0.22), transparent 18%),
+              radial-gradient(circle at 72% 24%, rgba(249,213,229,0.20), transparent 16%),
+              linear-gradient(180deg, #FCFBFF 0%, #F9F8FD 100%)
+            `,
+          }}>
             <div style={{
-              position: "relative", zIndex: 5,
-              minHeight: "calc(100dvh - 64px)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: "40px",
-              color: c.docText,
-              background: "radial-gradient(circle at 50% 0%, rgba(229,212,255,0.35), transparent 34%), #FAF9FB",
+              width: "100%",
+              maxWidth: "860px",
+              border: `1px solid ${c.panelBorder}`,
+              borderRadius: "30px",
+              background: "rgba(255,255,255,0.82)",
+              backdropFilter: "blur(12px)",
+              padding: "34px",
+              boxShadow: "0 24px 70px rgba(142,141,155,0.12)",
             }}>
               <div style={{
-                width: "100%",
-                maxWidth: "560px",
-                border: `1px solid ${c.panelBorder}`,
-                borderRadius: "22px",
-                background: "#FFFFFF",
-                padding: "44px 42px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
                 textAlign: "center",
-                boxShadow: "0 24px 70px rgba(142,141,155,0.16)",
+                gap: "10px",
+                marginBottom: "28px",
               }}>
-                <div style={{
-                  width: "64px", height: "64px", borderRadius: "18px",
-                  background: "#E5D4FF",
-                  color: "#5E5D6A",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  margin: "0 auto 18px",
-                }}>
-                  <FolderOpen size={28} />
-                </div>
-                <h1 style={{ fontSize: "28px", fontWeight: 850, margin: "0 0 10px", color: "#4E4D5B" }}>
-                  Start your first page
+                <h1 style={{ fontSize: "30px", fontWeight: 850, margin: 0, color: "#414256", letterSpacing: "-0.03em" }}>
+                  Start a new document
                 </h1>
-                <p style={{ fontSize: "14px", lineHeight: "1.7", color: c.docMuted, margin: "0 auto 26px", maxWidth: "360px" }}>
-                  Open a PDF or image to begin, then add notes, drawings, shapes, and pictures on top.
+                <p style={{ fontSize: "15px", lineHeight: "1.8", color: c.docMuted, margin: 0, maxWidth: "460px" }}>
+                  Choose a blank page or open a local file to begin working with the same Pastelle tools and layout.
                 </p>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px" }}>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                      padding: "14px 24px", borderRadius: "999px",
-                      background: "#25324A", color: "#FFFFFF",
-                      border: "none", cursor: "pointer",
-                      fontWeight: 850, fontSize: "14px", fontFamily: "inherit",
-                      minWidth: "220px",
-                    }}
-                  >
-                    <FolderOpen size={16} />
-                    Get started
-                  </button>
-                  <button
-                    onClick={startBlankPage}
-                    style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      background: "transparent", color: "#5E5D6A",
-                      border: "none", cursor: "pointer",
-                      fontWeight: 800, fontSize: "13px", fontFamily: "inherit",
-                      textDecoration: "underline",
-                      textUnderlineOffset: "4px",
-                    }}
-                  >
-                    Start with a blank page
-                  </button>
-                </div>
+              </div>
+
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "18px",
+                alignItems: "stretch",
+              }}>
+                <button
+                  onClick={startBlankPage}
+                  style={{
+                    border: `1px solid ${c.panelBorder}`,
+                    borderRadius: "18px",
+                    background: "#FFFFFF",
+                    padding: "22px 18px 20px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    boxShadow: "0 10px 28px rgba(142,141,155,0.08)",
+                    transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                  }}
+                >
+                  <div style={{
+                    width: "168px",
+                    height: "168px",
+                    margin: "0 auto 16px",
+                    borderRadius: "8px",
+                    border: `1px solid ${c.panelBorder}`,
+                    background: "#FFFFFF",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 6px 18px rgba(37,50,74,0.06)",
+                  }}>
+                    <div style={{ color: "#E74B3B" }}>
+                      <BlankPageIcon size={78} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "16px", fontWeight: 800, color: "#414256", marginBottom: "4px" }}>Blank document</div>
+                  <div style={{ fontSize: "13px", lineHeight: "1.6", color: c.docMuted }}>
+                    Start from scratch with a clean page and open canvas.
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    border: `1px solid ${c.panelBorder}`,
+                    borderRadius: "18px",
+                    background: "#FFFFFF",
+                    padding: "22px 18px 20px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    boxShadow: "0 10px 28px rgba(142,141,155,0.08)",
+                    transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                  }}
+                >
+                  <div style={{
+                    width: "168px",
+                    height: "168px",
+                    margin: "0 auto 16px",
+                    borderRadius: "8px",
+                    border: `1px solid ${c.panelBorder}`,
+                    background: "#FFFFFF",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 6px 18px rgba(37,50,74,0.06)",
+                  }}>
+                    <div style={{ color: "#8E8D9B" }}>
+                      <LocalUploadIcon size={72} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "16px", fontWeight: 800, color: "#414256", marginBottom: "4px" }}>Upload from local</div>
+                  <div style={{ fontSize: "13px", lineHeight: "1.6", color: c.docMuted }}>
+                    Open a PDF or image from your computer and continue in Pastelle.
+                  </div>
+                </button>
               </div>
             </div>
+          </div>
           )}
         </div>
 

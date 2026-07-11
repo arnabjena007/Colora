@@ -1597,6 +1597,30 @@ export default function EditorPage() {
     return wrapped;
   };
 
+  const getWrappedTextLayout = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+    const lines = wrapTextLines(ctx, text, maxWidth);
+    const layout: Array<{ text: string; start: number; end: number }> = [];
+    let cursor = 0;
+
+    lines.forEach(line => {
+      if (!line) {
+        const newlineIndex = text.indexOf("\n", cursor);
+        const start = newlineIndex >= 0 ? newlineIndex : cursor;
+        layout.push({ text: line, start, end: start });
+        cursor = newlineIndex >= 0 ? newlineIndex + 1 : cursor;
+        return;
+      }
+
+      const nextIndex = text.indexOf(line, cursor);
+      const start = nextIndex >= 0 ? nextIndex : cursor;
+      const end = start + line.length;
+      layout.push({ text: line, start, end });
+      cursor = end;
+    });
+
+    return layout;
+  };
+
   const insertTextAt = (clientX: number, clientY: number) => {
     const canvas = annotCanvasRef.current;
     const container = containerRef.current;
@@ -2264,17 +2288,48 @@ export default function EditorPage() {
       ctx.textBaseline = "top";
       ctx.textAlign = annotation.align ?? "left";
       const maxWidth = Math.max(80, (pageState.canvasWidth - annotation.x - 24) * scaleX);
-      const lines = wrapTextLines(ctx, annotation.text, maxWidth);
+      const lines = getWrappedTextLayout(ctx, annotation.text, maxWidth);
       const xBase = annotation.align === "center"
         ? annotation.x * scaleX + maxWidth / 2 + 6 * scaleX
         : annotation.align === "right"
           ? annotation.x * scaleX + maxWidth + 6 * scaleX
           : annotation.x * scaleX + 6 * scaleX;
+      const lineHeightPx = annotation.fontSize * annotation.lineHeight * scaleY;
       lines.forEach((line, index) => {
+        const lineY = annotation.y * scaleY + 4 * scaleY + index * lineHeightPx;
+        const lineText = line.text;
+        const lineWidth = ctx.measureText(lineText).width;
+        const lineLeft = annotation.align === "center"
+          ? xBase - lineWidth / 2
+          : annotation.align === "right"
+            ? xBase - lineWidth
+            : xBase;
+
+        (annotation.highlights ?? []).forEach((range) => {
+          const overlapStart = Math.max(range.start, line.start);
+          const overlapEnd = Math.min(range.end, line.end);
+          if (overlapEnd <= overlapStart || !lineText) return;
+
+          const prefix = lineText.slice(0, overlapStart - line.start);
+          const segment = lineText.slice(overlapStart - line.start, overlapEnd - line.start);
+          const prefixWidth = ctx.measureText(prefix).width;
+          const segmentWidth = Math.max(8 * scaleX, ctx.measureText(segment).width);
+          const markerX = lineLeft + prefixWidth - 3 * scaleX;
+          const markerY = lineY + annotation.fontSize * scaleY * 0.12;
+          const markerHeight = Math.max(10 * scaleY, annotation.fontSize * scaleY * 0.92);
+
+          ctx.save();
+          ctx.fillStyle = hexToRgba(range.color, 0.34);
+          ctx.beginPath();
+          ctx.roundRect(markerX, markerY, segmentWidth + 6 * scaleX, markerHeight, 6 * scaleY);
+          ctx.fill();
+          ctx.restore();
+        });
+
         ctx.fillText(
-          line,
+          lineText,
           xBase,
-          annotation.y * scaleY + 4 * scaleY + index * annotation.fontSize * annotation.lineHeight * scaleY
+          lineY
         );
       });
       ctx.restore();

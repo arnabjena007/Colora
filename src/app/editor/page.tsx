@@ -3958,6 +3958,7 @@ export default function EditorPage() {
           <div style={{
             position: "relative",
             zIndex: 5,
+            overflow: "hidden",
             minHeight: "calc(100dvh - 64px)",
             display: "flex",
             alignItems: "center",
@@ -3965,21 +3966,99 @@ export default function EditorPage() {
             padding: "40px 28px",
             color: c.docText,
             background: `
-              radial-gradient(circle at 50% 0%, rgba(229,212,255,0.32), transparent 28%),
-              radial-gradient(circle at 30% 18%, rgba(214,239,255,0.22), transparent 18%),
-              radial-gradient(circle at 72% 24%, rgba(249,213,229,0.20), transparent 16%),
-              linear-gradient(180deg, #FCFBFF 0%, #F9F8FD 100%)
+              radial-gradient(circle at 50% 0%, rgba(229,212,255,0.38), transparent 30%),
+              radial-gradient(circle at 24% 16%, rgba(214,239,255,0.28), transparent 20%),
+              radial-gradient(circle at 76% 22%, rgba(249,213,229,0.24), transparent 18%),
+              linear-gradient(180deg, #FEFCFF 0%, #F8F6FD 100%)
             `,
           }}>
+            <style jsx global>{`
+              @keyframes pastelGlowFloatA {
+                0% { transform: translate3d(-4%, -2%, 0) scale(1); }
+                50% { transform: translate3d(5%, 4%, 0) scale(1.08); }
+                100% { transform: translate3d(-4%, -2%, 0) scale(1); }
+              }
+
+              @keyframes pastelGlowFloatB {
+                0% { transform: translate3d(3%, 0%, 0) scale(1); }
+                50% { transform: translate3d(-5%, 5%, 0) scale(1.1); }
+                100% { transform: translate3d(3%, 0%, 0) scale(1); }
+              }
+
+              @keyframes pastelGlowFloatC {
+                0% { transform: translate3d(0%, 3%, 0) scale(1); }
+                50% { transform: translate3d(4%, -4%, 0) scale(1.06); }
+                100% { transform: translate3d(0%, 3%, 0) scale(1); }
+              }
+            `}</style>
+            <div style={{
+              position: "absolute",
+              inset: "-8%",
+              pointerEvents: "none",
+              opacity: 0.95,
+            }}>
+              <div style={{
+                position: "absolute",
+                top: "4%",
+                left: "6%",
+                width: "34vw",
+                minWidth: "280px",
+                height: "34vw",
+                minHeight: "280px",
+                borderRadius: "999px",
+                background: "radial-gradient(circle, rgba(210,224,255,0.65) 0%, rgba(210,224,255,0.24) 42%, rgba(210,224,255,0) 74%)",
+                filter: "blur(22px)",
+                animation: "pastelGlowFloatA 20s ease-in-out infinite",
+              }} />
+              <div style={{
+                position: "absolute",
+                top: "8%",
+                right: "3%",
+                width: "30vw",
+                minWidth: "240px",
+                height: "30vw",
+                minHeight: "240px",
+                borderRadius: "999px",
+                background: "radial-gradient(circle, rgba(245,208,228,0.6) 0%, rgba(245,208,228,0.22) 44%, rgba(245,208,228,0) 74%)",
+                filter: "blur(20px)",
+                animation: "pastelGlowFloatB 18s ease-in-out infinite",
+              }} />
+              <div style={{
+                position: "absolute",
+                bottom: "4%",
+                left: "18%",
+                width: "28vw",
+                minWidth: "220px",
+                height: "28vw",
+                minHeight: "220px",
+                borderRadius: "999px",
+                background: "radial-gradient(circle, rgba(255,233,182,0.52) 0%, rgba(255,233,182,0.18) 42%, rgba(255,233,182,0) 72%)",
+                filter: "blur(24px)",
+                animation: "pastelGlowFloatC 24s ease-in-out infinite",
+              }} />
+              <div style={{
+                position: "absolute",
+                right: "12%",
+                bottom: "-2%",
+                width: "26vw",
+                minWidth: "210px",
+                height: "26vw",
+                minHeight: "210px",
+                borderRadius: "999px",
+                background: "radial-gradient(circle, rgba(196,234,220,0.58) 0%, rgba(196,234,220,0.18) 42%, rgba(196,234,220,0) 72%)",
+                filter: "blur(24px)",
+                animation: "pastelGlowFloatA 22s ease-in-out infinite reverse",
+              }} />
+            </div>
             <div style={{
               width: "100%",
               maxWidth: "860px",
               border: `1px solid ${c.panelBorder}`,
               borderRadius: "30px",
-              background: "rgba(255,255,255,0.82)",
-              backdropFilter: "blur(12px)",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.82) 100%)",
+              backdropFilter: "blur(18px)",
               padding: "34px",
-              boxShadow: "0 24px 70px rgba(142,141,155,0.12)",
+              boxShadow: "0 26px 80px rgba(142,141,155,0.14), 0 0 0 1px rgba(255,255,255,0.45) inset",
             }}>
               <div style={{
                 display: "flex",

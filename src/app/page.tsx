@@ -3,7 +3,7 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight, Download, FileText, Layers3, PenTool, Sparkles } from "lucide-react";
+import { ArrowUpRight, Download, FileText, GitBranch, Layers3, PenTool, Sparkles } from "lucide-react";
 
 export default function Home() {
   return (
@@ -12,12 +12,21 @@ export default function Home() {
       <div className="absolute inset-x-0 top-0 h-[520px] bg-[linear-gradient(180deg,rgba(255,255,255,0.70),rgba(255,255,255,0))]" />
 
       <header className="absolute top-0 left-0 right-0 z-50 py-6">
-        <div className="max-w-7xl mx-auto px-6 flex justify-start items-center">
+        <div className="max-w-7xl mx-auto px-6 flex justify-between items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="font-sans font-bold text-2xl text-[#5E5D6A] tracking-tight flex items-center gap-1.5">
               <span className="text-xl text-[#8E8D9B]">✳</span> Colora
             </span>
           </div>
+          <a
+            href="https://github.com/arnabjena007/Colora"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/72 px-5 py-2.5 text-sm font-bold text-[#5E5D6A] shadow-sm backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-white"
+          >
+            <GitBranch className="h-4 w-4" />
+            Contribute
+          </a>
         </div>
       </header>
 

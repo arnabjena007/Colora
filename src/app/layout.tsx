@@ -11,13 +11,13 @@ const instrumentSans = Instrument_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Pastelle - PDF Annotation Toolkit",
-  description: "Design and edit PDFs with Pastelle, the premium all-in-one PDF annotation toolkit. Inspired by soft pastel colors and organic note-taking.",
-  applicationName: "Pastelle",
+  title: "Colora - PDF Annotation Toolkit",
+  description: "Design and edit PDFs with Colora, the premium all-in-one PDF annotation toolkit. Inspired by soft pastel colors and organic note-taking.",
+  applicationName: "Colora",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "Pastelle",
+    title: "Colora",
     statusBarStyle: "default",
   },
   formatDetection: {

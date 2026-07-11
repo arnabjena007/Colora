@@ -2437,7 +2437,7 @@ export default function EditorPage() {
         totalPages,
         selectedObject: selectedObjectRef.current,
       };
-      window.localStorage.setItem("pastelle-editor-state", JSON.stringify(payload));
+      window.localStorage.setItem("colora-editor-state", JSON.stringify(payload));
       setIsSaving(false);
       setLastSavedLabel(`Saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
     }, 250);
@@ -2460,7 +2460,7 @@ export default function EditorPage() {
   ]);
 
   useEffect(() => {
-    const raw = window.localStorage.getItem("pastelle-editor-state");
+    const raw = window.localStorage.getItem("colora-editor-state");
     if (!raw) return;
     try {
       const saved = JSON.parse(raw);
@@ -2679,7 +2679,7 @@ export default function EditorPage() {
               ) : null}
             </>
           ) : (
-            <span style={{ fontSize: "16px", fontWeight: 800, color: c.inputColor }}>Pastelle</span>
+            <span style={{ fontSize: "16px", fontWeight: 800, color: c.inputColor }}>Colora</span>
           )}
         </div>
 
@@ -3766,7 +3766,7 @@ export default function EditorPage() {
                   Start a new document
                 </h1>
                 <p style={{ fontSize: "15px", lineHeight: "1.8", color: c.docMuted, margin: 0, maxWidth: "460px" }}>
-                  Choose a blank page or open a local file to begin working with the same Pastelle tools and layout.
+                  Choose a blank page or open a local file to begin working with the same Colora tools and layout.
                 </p>
               </div>
 
@@ -3842,7 +3842,7 @@ export default function EditorPage() {
                   </div>
                   <div style={{ fontSize: "16px", fontWeight: 800, color: "#414256", marginBottom: "4px" }}>Upload from local</div>
                   <div style={{ fontSize: "13px", lineHeight: "1.6", color: c.docMuted }}>
-                    Open a PDF or image from your computer and continue in Pastelle.
+                    Open a PDF or image from your computer and continue in Colora.
                   </div>
                 </button>
               </div>

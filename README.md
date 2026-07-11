@@ -1,8 +1,8 @@
-# Pastelle
+# Colora
 
 A calm, modern PDF annotation workspace designed for distraction-free editing.
 
-Pastelle is a pastel-inspired PDF annotation and document editing application built for students, researchers, designers, and professionals. It combines powerful annotation tools with a clean, minimal interface that feels effortless to use.
+Colora is a pastel-inspired PDF annotation and document editing application built for students, researchers, designers, and professionals. It combines powerful annotation tools with a clean, minimal interface that feels effortless to use.
 
 ---
 
@@ -129,20 +129,9 @@ The goal is to make document annotation feel simple, focused, and enjoyable.
 
 ---
 
-## Preview Video Flow
-
-1. Introduce Pastelle.
-2. Show the launcher with the blank page and local upload options.
-3. Open a PDF.
-4. Demonstrate highlighting, drawing, text editing, shapes, notes, signatures, and erasing.
-5. Show page navigation and zoom controls.
-6. Export the annotated document.
-
----
-
 ## Design Goals
 
-Pastelle is built around three ideas:
+Colora is built around three ideas:
 
 - Fast and intuitive annotation
 - A clean interface that stays out of the way

@@ -22,6 +22,12 @@ interface NoteItem {
   y: number;
 }
 
+interface TextHighlightRange {
+  start: number;
+  end: number;
+  color: string;
+}
+
 interface TextAnnotationItem {
   id: string;
   text: string;
@@ -35,6 +41,8 @@ interface TextAnnotationItem {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  highlights?: TextHighlightRange[];
+  highlightColor?: string;
 }
 
 interface PictureItem {
@@ -269,6 +277,116 @@ const renderInlineFormattedText = (text: string, style?: ListStyle) => {
   if (!nodes.length) return rendered;
   if (lastIndex < rendered.length) nodes.push(rendered.slice(lastIndex));
   return nodes;
+};
+
+const visibleIndexToRawIndex = (text: string, visibleIndex: number) => {
+  let visible = 0;
+  for (let raw = 0; raw < text.length; raw += 1) {
+    if (text.slice(raw, raw + 2) === "**") {
+      raw += 1;
+      continue;
+    }
+    if (visible >= visibleIndex) return raw;
+    visible += 1;
+  }
+  return text.length;
+};
+
+const selectionOffsetInElement = (root: HTMLElement, node: Node, offset: number) => {
+  let total = 0;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let current = walk.nextNode();
+
+  while (current) {
+    if (current === node) return total + offset;
+    if (current.contains(node)) return total + offset;
+    total += current.textContent?.length ?? 0;
+    current = walk.nextNode();
+  }
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as Element;
+    const children = Array.from(element.childNodes).slice(0, offset);
+    return children.reduce((sum, child) => sum + (child.textContent?.length ?? 0), 0);
+  }
+
+  return total;
+};
+
+const mergeHighlightRanges = (ranges: TextHighlightRange[] = [], next: TextHighlightRange) => {
+  const normalized = [
+    ...ranges.filter(range => range.end <= next.start || range.start >= next.end),
+    next,
+  ]
+    .filter(range => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+  const merged: TextHighlightRange[] = [];
+
+  normalized.forEach(range => {
+    const last = merged[merged.length - 1];
+    if (last && last.color === range.color && range.start <= last.end) {
+      last.end = Math.max(last.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  });
+
+  return merged;
+};
+
+const renderHighlightedFormattedText = (
+  text: string,
+  style?: ListStyle,
+  highlights: TextHighlightRange[] = []
+) => {
+  const cleanRanges = highlights
+    .filter(range => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+
+  if (!cleanRanges.length) return renderInlineFormattedText(text, style);
+
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  cleanRanges.forEach((range, index) => {
+    const start = Math.max(0, Math.min(text.length, range.start));
+    const end = Math.max(start, Math.min(text.length, range.end));
+    if (start > cursor) {
+      nodes.push(<React.Fragment key={`plain-${index}`}>{renderInlineFormattedText(text.slice(cursor, start), undefined)}</React.Fragment>);
+    }
+    nodes.push(
+      <span
+        key={`highlight-${index}`}
+        style={{
+          display: "inline",
+          padding: "0.05em 0.42em 0.17em",
+          borderRadius: "0.35em 0.85em 0.42em 0.78em",
+          transform: "rotate(-3.2deg) skewX(-6deg)",
+          transformOrigin: "left center",
+          background: `
+            linear-gradient(164deg, ${hexToRgba(range.color, 0)} 0%, ${hexToRgba(range.color, 0.18)} 13%, ${hexToRgba(range.color, 0.02)} 88%, ${hexToRgba(range.color, 0)} 100%),
+            linear-gradient(171deg, ${hexToRgba(range.color, 0.22)} 5%, ${hexToRgba(range.color, 0.43)} 48%, ${hexToRgba(range.color, 0.26)} 94%)
+          `,
+          boxShadow: `
+            inset -10px 2px 0 ${hexToRgba(range.color, 0.05)},
+            inset 8px -2px 0 ${hexToRgba(range.color, 0.08)},
+            0 0 0 1px ${hexToRgba(range.color, 0.06)}
+          `,
+          boxDecorationBreak: "clone",
+          WebkitBoxDecorationBreak: "clone",
+          filter: "saturate(1.04)",
+        }}
+      >
+        {renderInlineFormattedText(text.slice(start, end), undefined)}
+      </span>
+    );
+    cursor = end;
+  });
+
+  if (cursor < text.length) {
+    nodes.push(<React.Fragment key="plain-tail">{renderInlineFormattedText(text.slice(cursor), undefined)}</React.Fragment>);
+  }
+
+  return style && style !== "none" ? renderInlineFormattedText(displayTextForListStyle(text, style), undefined) : nodes;
 };
 
 const roughSeed = (...values: number[]) => {
@@ -697,6 +815,7 @@ export default function EditorPage() {
   const pageNumPendingRef = useRef<number | null>(null);
   const pdfjsLibRef = useRef<PdfJsLib | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const preserveRedoOnceRef = useRef(false);
   const activeToolRef = useRef("select");
   const activeColorRef = useRef(DEFAULT_HIGHLIGHT_COLOR);
   const brushWidthRef = useRef(22);
@@ -710,6 +829,7 @@ export default function EditorPage() {
   const shapeFillStyleRef = useRef<ShapeFillStyle>("hachure");
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const textLayerInstanceRef = useRef<PdfTextLayer | null>(null);
+  const continuingTextRef = useRef(false);
   const pageStoreRef = useRef<Map<number, PageState>>(new Map());
   const pagesRef = useRef<PdfPageSource[]>([]);
   const renderPageRef = useRef<(num: number) => void>(() => {});
@@ -824,7 +944,11 @@ export default function EditorPage() {
     if (!snapshot) return;
     undoListRef.current.push(snapshot);
     if (undoListRef.current.length > 30) undoListRef.current.shift();
-    redoListRef.current = [];
+    if (preserveRedoOnceRef.current) {
+      preserveRedoOnceRef.current = false;
+    } else {
+      redoListRef.current = [];
+    }
   }, [captureSnapshot]);
 
   const restoreState = useCallback((snapshot: DocumentSnapshot) => {
@@ -1025,6 +1149,7 @@ export default function EditorPage() {
     const cur = undoListRef.current.pop()!;
     redoListRef.current.push(cur);
     restoreState(undoListRef.current[undoListRef.current.length - 1]);
+    preserveRedoOnceRef.current = true;
     toast("Undo ✓");
   };
 
@@ -1033,6 +1158,7 @@ export default function EditorPage() {
     const next = redoListRef.current.pop()!;
     undoListRef.current.push(next);
     restoreState(next);
+    preserveRedoOnceRef.current = true;
     toast("Redo ✓");
   };
 
@@ -1751,10 +1877,19 @@ export default function EditorPage() {
       const textHost = ancestorElement?.closest?.(".text-annotation-item") as HTMLElement | null;
       const textId = textHost?.dataset?.textId;
       if (textId) {
+        const visibleStart = selectionOffsetInElement(textHost, range.startContainer, range.startOffset);
+        const visibleEnd = selectionOffsetInElement(textHost, range.endContainer, range.endOffset);
         setTextAnnotations(prev =>
-          prev.map(t =>
-            t.id === textId ? ({ ...t, highlightColor: activeColorRef.current } as any) : t
-          )
+          prev.map(t => {
+            if (t.id !== textId) return t;
+            const start = visibleIndexToRawIndex(t.text, Math.min(visibleStart, visibleEnd));
+            const end = visibleIndexToRawIndex(t.text, Math.max(visibleStart, visibleEnd));
+            return {
+              ...t,
+              highlightColor: undefined,
+              highlights: mergeHighlightRanges(t.highlights, { start, end, color: activeColorRef.current }),
+            };
+          })
         );
         saveState();
         sel.removeAllRanges();
@@ -1933,6 +2068,52 @@ export default function EditorPage() {
     setTotalPages(pagesRef.current.length);
     renderPage(nextPage);
     toast("Blank page added");
+  };
+
+  const continueTextOnNewPage = (annotation: TextAnnotationItem) => {
+    const annC = annotCanvasRef.current;
+    const ctx = annC?.getContext("2d");
+    if (!isPdfLoaded || !annC || !ctx || continuingTextRef.current) return;
+
+    continuingTextRef.current = true;
+    savePageState(pageNum);
+    const blankDoc = blankDocRef.current ?? createBlankPdfDocument();
+    blankDocRef.current = blankDoc;
+    shiftStoredPages(pageNum + 1, 1);
+    pagesRef.current.splice(pageNum, 0, { doc: blankDoc, pageNumber: 1, name: "Blank page" });
+
+    const nextPage = pageNum + 1;
+    const nextId = crypto.randomUUID();
+    const nextAnnotation: TextAnnotationItem = {
+      ...annotation,
+      id: nextId,
+      text: "",
+      y: 64,
+      highlights: [],
+      highlightColor: undefined,
+    };
+
+    pageStoreRef.current.set(nextPage, {
+      imageData: ctx.createImageData(annC.width, annC.height),
+      canvasWidth: annC.width,
+      canvasHeight: annC.height,
+      undoStack: [],
+      redoStack: [],
+      notes: [],
+      textAnnotations: [nextAnnotation],
+      pictures: [],
+    });
+
+    setTotalPages(pagesRef.current.length);
+    activeTextIdRef.current = nextId;
+    selectedObjectRef.current = { kind: "text", id: nextId };
+    renderPage(nextPage);
+    requestAnimationFrame(() => {
+      setEditingTextId(nextId);
+      setSelectedObject({ kind: "text", id: nextId });
+      continuingTextRef.current = false;
+    });
+    toast("Continued on a new page");
   };
 
   const renderPage = (num: number) => {
@@ -3303,8 +3484,23 @@ export default function EditorPage() {
                     });
                   }}
                   onChange={e => {
+                    const el = e.currentTarget;
                     const nextValue = e.target.value.replace(/\r/g, "");
                     setTextAnnotations(prev => prev.map(t => t.id === annotation.id ? { ...t, text: nextValue } : t));
+                    requestAnimationFrame(() => {
+                      el.style.width = "auto";
+                      el.style.width = `${Math.max(180, el.scrollWidth + 18)}px`;
+                      el.style.height = "auto";
+                      el.style.height = `${Math.max(
+                        annotation.fontSize * annotation.lineHeight + 24,
+                        el.scrollHeight + 4
+                      )}px`;
+                      const pageHeight = containerRef.current?.clientHeight ?? 0;
+                      const bottom = annotation.y + el.offsetHeight;
+                      if (nextValue.trim() && pageHeight > 0 && bottom > pageHeight - 36) {
+                        continueTextOnNewPage({ ...annotation, text: nextValue });
+                      }
+                    });
                   }}
                   onBlur={e => {
                     const nextTarget = e.relatedTarget as HTMLElement | null;
@@ -3456,33 +3652,7 @@ export default function EditorPage() {
                 }}
               >
                 <div style={{ position: "relative", zIndex: 1 }}>
-                  {(annotation as any).highlightColor ? (
-                    <span
-                      style={{
-                        display: "inline",
-                        padding: "0.05em 0.42em 0.17em",
-                        borderRadius: "0.35em 0.85em 0.42em 0.78em",
-                        transform: "rotate(-3.2deg) skewX(-6deg)",
-                        transformOrigin: "left center",
-                        background: `
-                          linear-gradient(164deg, ${hexToRgba((annotation as any).highlightColor, 0)} 0%, ${hexToRgba((annotation as any).highlightColor, 0.18)} 13%, ${hexToRgba((annotation as any).highlightColor, 0.02)} 88%, ${hexToRgba((annotation as any).highlightColor, 0)} 100%),
-                          linear-gradient(171deg, ${hexToRgba((annotation as any).highlightColor, 0.22)} 5%, ${hexToRgba((annotation as any).highlightColor, 0.43)} 48%, ${hexToRgba((annotation as any).highlightColor, 0.26)} 94%)
-                        `,
-                        boxShadow: `
-                          inset -10px 2px 0 ${hexToRgba((annotation as any).highlightColor, 0.05)},
-                          inset 8px -2px 0 ${hexToRgba((annotation as any).highlightColor, 0.08)},
-                          0 0 0 1px ${hexToRgba((annotation as any).highlightColor, 0.06)}
-                        `,
-                        boxDecorationBreak: "clone",
-                        WebkitBoxDecorationBreak: "clone",
-                        filter: "saturate(1.04)",
-                      }}
-                    >
-                      {renderInlineFormattedText(annotation.text, annotation.listStyle)}
-                    </span>
-                  ) : (
-                    renderInlineFormattedText(annotation.text, annotation.listStyle)
-                  )}
+                  {renderHighlightedFormattedText(annotation.text, annotation.listStyle, annotation.highlights)}
                 </div>
               </div>
             );

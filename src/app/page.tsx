@@ -15,7 +15,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6 flex justify-start items-center">
           <div className="flex items-center gap-2">
             <span className="font-sans font-bold text-2xl text-[#5E5D6A] tracking-tight flex items-center gap-1.5">
-              <span className="text-xl text-[#8E8D9B]">✳</span> Pastelle
+              <span className="text-xl text-[#8E8D9B]">✳</span> Colora
             </span>
           </div>
         </div>
@@ -24,7 +24,7 @@ export default function Home() {
       <section id="overview" className="relative w-full min-h-screen flex flex-col justify-center px-6 py-24 overflow-hidden motion-fade-up">
         <Image
           src="/assets/hero_bg.png"
-          alt="Pastelle watercolor landscape"
+          alt="Colora watercolor landscape"
           fill
           priority
           sizes="100vw"
@@ -41,7 +41,7 @@ export default function Home() {
               A polished editor for marking up PDFs without the clutter
             </h1>
             <p className="text-[#5E5D6A]/82 text-base md:text-lg max-w-2xl mx-auto leading-relaxed font-medium mb-8">
-              Pastelle blends a soft premium interface with fast annotation tools, clean page controls, and a workspace that stays out of your way.
+              Colora blends a soft premium interface with fast annotation tools, clean page controls, and a workspace that stays out of your way.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Link href="/editor" className="inline-flex items-center gap-2 px-7 py-3.5 bg-[#E5D4FF] text-[#5E5D6A] hover:bg-[#F9D5E5] font-bold text-sm rounded-full transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 hover:scale-[1.01] motion-hover-lift">
@@ -69,7 +69,7 @@ export default function Home() {
                   Just the tools you need, without making the page feel busy
                 </h2>
                 <p className="text-sm md:text-base leading-relaxed text-[#5E5D6A] max-w-xl">
-                  Pastelle keeps the landing page focused: open your document, mark it up, and export when you are done.
+                  Colora keeps the landing page focused: open your document, mark it up, and export when you are done.
                 </p>
               </div>
 
@@ -115,8 +115,8 @@ export default function Home() {
 
       <footer className="relative z-10 border-t border-white/60 bg-white/58 backdrop-blur-md py-6 text-center text-sm text-[#5E5D6A]/80">
         <div className="max-w-6xl mx-auto px-6 flex flex-col items-center gap-2">
-          <div className="font-bold text-[#373744]">Pastelle</div>
-          <p className="opacity-70">&copy; 2026 Pastelle Toolkit.</p>
+          <div className="font-bold text-[#373744]">Colora</div>
+          <p className="opacity-70">&copy; 2026 Colora Toolkit.</p>
         </div>
       </footer>
     </div>

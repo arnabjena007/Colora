@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Pastelle PDF Editor",
-    short_name: "Pastelle",
+    name: "Colora PDF Editor",
+    short_name: "Colora",
     description: "A design-first PDF annotation editor for highlighting, signing, merging, and exporting PDFs.",
     start_url: "/editor",
     scope: "/",
@@ -30,7 +30,7 @@ export default function manifest(): MetadataRoute.Manifest {
       {
         name: "Open PDF Editor",
         short_name: "Editor",
-        description: "Launch the Pastelle PDF editor",
+        description: "Launch the Colora PDF editor",
         url: "/editor",
         icons: [{ src: "/pwa-icon-512.png", sizes: "512x512", type: "image/png" }],
       },

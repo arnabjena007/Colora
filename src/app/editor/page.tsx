@@ -356,7 +356,6 @@ const highlightMarkerStyle = (color: string): React.CSSProperties => ({
   WebkitBoxDecorationBreak: "clone",
   filter: "saturate(1.04)",
 });
-
 const renderHighlightedFormattedText = (
   text: string,
   style?: ListStyle,
@@ -818,6 +817,7 @@ export default function EditorPage() {
   const pageNumPendingRef = useRef<number | null>(null);
   const pdfjsLibRef = useRef<PdfJsLib | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const preserveRedoOnceRef = useRef(false);
   const activeToolRef = useRef("select");
   const activeColorRef = useRef(DEFAULT_HIGHLIGHT_COLOR);
   const brushWidthRef = useRef(22);
@@ -831,6 +831,7 @@ export default function EditorPage() {
   const shapeFillStyleRef = useRef<ShapeFillStyle>("hachure");
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const textLayerInstanceRef = useRef<PdfTextLayer | null>(null);
+  const continuingTextRef = useRef(false);
   const pageStoreRef = useRef<Map<number, PageState>>(new Map());
   const pagesRef = useRef<PdfPageSource[]>([]);
   const renderPageRef = useRef<(num: number) => void>(() => {});
@@ -945,7 +946,11 @@ export default function EditorPage() {
     if (!snapshot) return;
     undoListRef.current.push(snapshot);
     if (undoListRef.current.length > 30) undoListRef.current.shift();
-    redoListRef.current = [];
+    if (preserveRedoOnceRef.current) {
+      preserveRedoOnceRef.current = false;
+    } else {
+      redoListRef.current = [];
+    }
   }, [captureSnapshot]);
 
   const restoreState = useCallback((snapshot: DocumentSnapshot) => {
@@ -1146,6 +1151,7 @@ export default function EditorPage() {
     const cur = undoListRef.current.pop()!;
     redoListRef.current.push(cur);
     restoreState(undoListRef.current[undoListRef.current.length - 1]);
+    preserveRedoOnceRef.current = true;
     toast("Undo ✓");
   };
 
@@ -1154,6 +1160,7 @@ export default function EditorPage() {
     const next = redoListRef.current.pop()!;
     undoListRef.current.push(next);
     restoreState(next);
+    preserveRedoOnceRef.current = true;
     toast("Redo ✓");
   };
 
@@ -2063,6 +2070,52 @@ export default function EditorPage() {
     setTotalPages(pagesRef.current.length);
     renderPage(nextPage);
     toast("Blank page added");
+  };
+
+  const continueTextOnNewPage = (annotation: TextAnnotationItem) => {
+    const annC = annotCanvasRef.current;
+    const ctx = annC?.getContext("2d");
+    if (!isPdfLoaded || !annC || !ctx || continuingTextRef.current) return;
+
+    continuingTextRef.current = true;
+    savePageState(pageNum);
+    const blankDoc = blankDocRef.current ?? createBlankPdfDocument();
+    blankDocRef.current = blankDoc;
+    shiftStoredPages(pageNum + 1, 1);
+    pagesRef.current.splice(pageNum, 0, { doc: blankDoc, pageNumber: 1, name: "Blank page" });
+
+    const nextPage = pageNum + 1;
+    const nextId = crypto.randomUUID();
+    const nextAnnotation: TextAnnotationItem = {
+      ...annotation,
+      id: nextId,
+      text: "",
+      y: 64,
+      highlights: [],
+      highlightColor: undefined,
+    };
+
+    pageStoreRef.current.set(nextPage, {
+      imageData: ctx.createImageData(annC.width, annC.height),
+      canvasWidth: annC.width,
+      canvasHeight: annC.height,
+      undoStack: [],
+      redoStack: [],
+      notes: [],
+      textAnnotations: [nextAnnotation],
+      pictures: [],
+    });
+
+    setTotalPages(pagesRef.current.length);
+    activeTextIdRef.current = nextId;
+    selectedObjectRef.current = { kind: "text", id: nextId };
+    renderPage(nextPage);
+    requestAnimationFrame(() => {
+      setEditingTextId(nextId);
+      setSelectedObject({ kind: "text", id: nextId });
+      continuingTextRef.current = false;
+    });
+    toast("Continued on a new page");
   };
 
   const renderPage = (num: number) => {
@@ -3433,8 +3486,23 @@ export default function EditorPage() {
                     });
                   }}
                   onChange={e => {
+                    const el = e.currentTarget;
                     const nextValue = e.target.value.replace(/\r/g, "");
                     setTextAnnotations(prev => prev.map(t => t.id === annotation.id ? { ...t, text: nextValue } : t));
+                    requestAnimationFrame(() => {
+                      el.style.width = "auto";
+                      el.style.width = `${Math.max(180, el.scrollWidth + 18)}px`;
+                      el.style.height = "auto";
+                      el.style.height = `${Math.max(
+                        annotation.fontSize * annotation.lineHeight + 24,
+                        el.scrollHeight + 4
+                      )}px`;
+                      const pageHeight = containerRef.current?.clientHeight ?? 0;
+                      const bottom = annotation.y + el.offsetHeight;
+                      if (nextValue.trim() && pageHeight > 0 && bottom > pageHeight - 36) {
+                        continueTextOnNewPage({ ...annotation, text: nextValue });
+                      }
+                    });
                   }}
                   onBlur={e => {
                     const nextTarget = e.relatedTarget as HTMLElement | null;

@@ -5,6 +5,16 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import rough from "roughjs/bin/rough";
 import type { Options as RoughOptions } from "roughjs/bin/core";
+import type { CloudCanvasStroke, CloudDocumentRecord, CloudEditorState, CloudPageSnapshot, CloudSourceFile } from "@/lib/cloud-document";
+import {
+  fetchSupabaseUser,
+  getStoredSupabaseSession,
+  requestMagicLink,
+  signOutSupabaseSession,
+  storeSupabaseSession,
+  type SupabaseSession,
+  type SupabaseUser,
+} from "@/lib/supabase-auth";
 import {
   Highlighter, Pencil, Type, MessageSquare, Square,
   Download, Undo2, Redo2, FolderOpen, X,
@@ -55,8 +65,39 @@ interface PictureItem {
   height: number;
 }
 
+type StrokePoint = {
+  x: number;
+  y: number;
+};
+
+type HighlightStrokeBox = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tilt: number;
+  wobble: number;
+};
+
+type PencilStroke = {
+  id: string;
+  kind: "pencil";
+  color: string;
+  width: number;
+  points: StrokePoint[];
+};
+
+type HighlightStroke = {
+  id: string;
+  kind: "highlight";
+  color: string;
+  boxes: HighlightStrokeBox[];
+};
+
+type CanvasStroke = PencilStroke | HighlightStroke;
+
 interface PageState {
-  imageData: ImageData;
+  baseImageData: ImageData;
   canvasWidth: number;
   canvasHeight: number;
   undoStack: DocumentSnapshot[];
@@ -64,15 +105,17 @@ interface PageState {
   notes: NoteItem[];
   textAnnotations: TextAnnotationItem[];
   pictures: PictureItem[];
+  strokes: CanvasStroke[];
 }
 
 interface DocumentSnapshot {
-  imageData: ImageData;
+  baseImageData: ImageData;
   canvasWidth: number;
   canvasHeight: number;
   notes: NoteItem[];
   textAnnotations: TextAnnotationItem[];
   pictures: PictureItem[];
+  strokes: CanvasStroke[];
 }
 
 interface PdfPageSource {
@@ -542,6 +585,28 @@ function drawNaturalHighlightRects(
   ctx.restore();
 }
 
+const createNaturalHighlightStroke = (
+  rects: DOMRectList,
+  containerRect: DOMRect,
+  scaleX: number,
+  scaleY: number,
+  color: string,
+): HighlightStroke => ({
+  id: crypto.randomUUID(),
+  kind: "highlight",
+  color,
+  boxes: Array.from(rects).flatMap((rect, index) => {
+    if (rect.width < 2 || rect.height < 2) return [];
+    const x = (rect.left - containerRect.left - 2) * scaleX;
+    const y = (rect.top - containerRect.top + rect.height * 0.12) * scaleY;
+    const w = (rect.width + 4) * scaleX;
+    const h = Math.max(8, (rect.height + 5) * scaleY);
+    const tilt = ((index % 2 === 0 ? -1 : 1) * Math.min(5, Math.max(2, w * 0.018))) * scaleX;
+    const wobble = Math.min(2.2, Math.max(0.8, h * 0.08));
+    return [{ x, y, w, h, tilt, wobble }];
+  }),
+});
+
 type TextDropdownProps<T extends string | number> = {
   value: T;
   width: string;
@@ -732,6 +797,117 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
   reader.readAsDataURL(file);
 });
 
+const loadImageFromDataUrl = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+  const image = new Image();
+  image.onload = () => resolve(image);
+  image.onerror = () => reject(new Error("Could not load image"));
+  image.src = src;
+});
+
+const imageDataToDataUrl = (imageData: ImageData) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  canvas.getContext("2d")?.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
+};
+
+const dataUrlToImageData = async (src: string, width: number, height: number) => {
+  const image = await loadImageFromDataUrl(src);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not prepare canvas");
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height);
+};
+
+const uniqueSourceFiles = (files: CloudSourceFile[]) => {
+  const seen = new Set<string>();
+  return files.filter(file => {
+    const key = `${file.storagePath}|${file.name}|${file.size}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const cloneImageData = (imageData: ImageData) =>
+  new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
+
+const cloneCanvasStroke = (stroke: CanvasStroke): CanvasStroke =>
+  stroke.kind === "pencil"
+    ? { ...stroke, points: stroke.points.map(point => ({ ...point })) }
+    : { ...stroke, boxes: stroke.boxes.map(box => ({ ...box })) };
+
+const createEmptyImageData = (width: number, height: number) =>
+  new ImageData(width, height);
+
+const drawPencilStroke = (ctx: CanvasRenderingContext2D, stroke: PencilStroke) => {
+  if (!stroke.points.length) return;
+  ctx.save();
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = stroke.width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = 0.9;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.beginPath();
+  ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+  if (stroke.points.length === 1) {
+    ctx.lineTo(stroke.points[0].x + 0.1, stroke.points[0].y + 0.1);
+  } else {
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      const point = stroke.points[index];
+      const previous = stroke.points[index - 1];
+      const midX = (previous.x + point.x) / 2;
+      const midY = (previous.y + point.y) / 2;
+      ctx.quadraticCurveTo(previous.x, previous.y, midX, midY);
+    }
+    const tail = stroke.points[stroke.points.length - 1];
+    ctx.lineTo(tail.x, tail.y);
+  }
+  ctx.stroke();
+  ctx.restore();
+};
+
+const drawHighlightStroke = (ctx: CanvasRenderingContext2D, stroke: HighlightStroke) => {
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = stroke.color;
+
+  stroke.boxes.forEach(box => {
+    ctx.globalAlpha = 0.34;
+    ctx.beginPath();
+    ctx.moveTo(box.x + box.tilt, box.y + box.wobble);
+    ctx.lineTo(box.x + box.w + box.tilt * 0.35, box.y - box.wobble);
+    ctx.lineTo(box.x + box.w - box.tilt, box.y + box.h + box.wobble);
+    ctx.lineTo(box.x - box.tilt * 0.4, box.y + box.h - box.wobble);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath();
+    ctx.moveTo(box.x + 1 - box.tilt * 0.2, box.y + box.h * 0.24);
+    ctx.lineTo(box.x + box.w - 1 + box.tilt * 0.2, box.y + box.h * 0.08);
+    ctx.lineTo(box.x + box.w - 2 - box.tilt * 0.2, box.y + box.h * 0.72);
+    ctx.lineTo(box.x + 2 + box.tilt * 0.2, box.y + box.h * 0.86);
+    ctx.closePath();
+    ctx.fill();
+  });
+
+  ctx.restore();
+};
+
+const drawCanvasStrokes = (ctx: CanvasRenderingContext2D, strokes: CanvasStroke[]) => {
+  strokes.forEach(stroke => {
+    if (stroke.kind === "pencil") drawPencilStroke(ctx, stroke);
+    else drawHighlightStroke(ctx, stroke);
+  });
+};
+
 function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
   const maxEdge = 1600;
   const ratio = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
@@ -758,6 +934,7 @@ function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
 }
 
 export default function EditorPage() {
+  const cloudDraftsEnabled = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const [activeTool, setActiveTool] = useState("select");
   const [activeColor, setActiveColor] = useState(DEFAULT_HIGHLIGHT_COLOR);
   const [brushWidth, setBrushWidth] = useState(22);
@@ -795,6 +972,21 @@ export default function EditorPage() {
   const [toolTipText, setToolTipText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
+  const [cloudDocumentId, setCloudDocumentId] = useState<string | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authSession, setAuthSession] = useState<SupabaseSession | null>(null);
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
+  const [isAuthWorking, setIsAuthWorking] = useState(false);
+  const [sourceFiles, setSourceFiles] = useState<CloudSourceFile[]>([]);
+  const [cloudDocuments, setCloudDocuments] = useState<Array<{
+    id: string;
+    title: string;
+    updated_at: string;
+    created_at: string;
+  }>>([]);
+  const [showDocumentsMenu, setShowDocumentsMenu] = useState(false);
+  const [isDocumentsLoading, setIsDocumentsLoading] = useState(false);
 
   const annotCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -847,6 +1039,14 @@ export default function EditorPage() {
   const zoomLevelRef = useRef(0.5);
   const includePageNumbersRef = useRef(false);
   const signatureTextRef = useRef("");
+  const cloudDocumentIdRef = useRef<string | null>(null);
+  const cloudBrowserKeyRef = useRef("");
+  const cloudAutosaveTimerRef = useRef<number | null>(null);
+  const authSessionRef = useRef<SupabaseSession | null>(null);
+  const sourceFilesRef = useRef<CloudSourceFile[]>([]);
+  const baseImageDataRef = useRef<ImageData | null>(null);
+  const strokesRef = useRef<CanvasStroke[]>([]);
+  const currentStrokeRef = useRef<PencilStroke | null>(null);
   const keyboardActionsRef = useRef<KeyboardActions>({
     clearActiveTool: () => {},
     undo: () => {},
@@ -887,12 +1087,70 @@ export default function EditorPage() {
   useEffect(() => { zoomLevelRef.current = zoomLevel; }, [zoomLevel]);
   useEffect(() => { includePageNumbersRef.current = includePageNumbers; }, [includePageNumbers]);
   useEffect(() => { signatureTextRef.current = signatureText; }, [signatureText]);
+  useEffect(() => { cloudDocumentIdRef.current = cloudDocumentId; }, [cloudDocumentId]);
+  useEffect(() => { authSessionRef.current = authSession; }, [authSession]);
+  useEffect(() => { sourceFilesRef.current = sourceFiles; }, [sourceFiles]);
 
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 2000);
   }, []);
+
+  useEffect(() => {
+    if (!cloudDraftsEnabled) return;
+    const storedKey = window.localStorage.getItem("colora-cloud-browser-key");
+    const browserKey = storedKey || crypto.randomUUID();
+    if (!storedKey) window.localStorage.setItem("colora-cloud-browser-key", browserKey);
+    cloudBrowserKeyRef.current = browserKey;
+    const storedDocumentId = window.localStorage.getItem("colora-cloud-document-id");
+    if (storedDocumentId) {
+      cloudDocumentIdRef.current = storedDocumentId;
+      setCloudDocumentId(storedDocumentId);
+    }
+    setCloudReady(true);
+  }, [cloudDraftsEnabled]);
+
+  useEffect(() => {
+    if (!cloudDraftsEnabled) return;
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const accessToken = hash.get("access_token");
+    const refreshToken = hash.get("refresh_token") ?? undefined;
+    if (accessToken) {
+      const session: SupabaseSession = {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: hash.get("token_type") ?? undefined,
+        expires_in: hash.get("expires_in") ? Number(hash.get("expires_in")) : undefined,
+      };
+      storeSupabaseSession(session);
+      setAuthSession(session);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setLastSavedLabel("Signed in");
+    } else {
+      const stored = getStoredSupabaseSession();
+      if (stored) setAuthSession(stored);
+    }
+  }, [cloudDraftsEnabled]);
+
+  useEffect(() => {
+    if (!authSession?.access_token) {
+      setAuthUser(null);
+      setCloudDocuments([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchSupabaseUser(authSession.access_token).then(user => {
+      if (cancelled) return;
+      setAuthUser(user);
+    }).catch(() => {
+      if (cancelled) return;
+      setAuthUser(null);
+      setAuthSession(null);
+      storeSupabaseSession(null);
+    });
+    return () => { cancelled = true; };
+  }, [authSession]);
 
   const flashToolTips = useCallback((msg: string) => {
     if (helpHideTimerRef.current) window.clearTimeout(helpHideTimerRef.current);
@@ -926,18 +1184,36 @@ export default function EditorPage() {
     toast("Select active");
   }, [toast]);
 
+  const redrawAnnotationLayer = useCallback((baseImageData?: ImageData | null, strokes?: CanvasStroke[]) => {
+    const canvas = annotCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const nextBase = baseImageData ?? baseImageDataRef.current;
+    if (nextBase && nextBase.width === canvas.width && nextBase.height === canvas.height) {
+      ctx.putImageData(nextBase, 0, 0);
+    } else if (nextBase) {
+      const tmp = document.createElement("canvas");
+      tmp.width = nextBase.width;
+      tmp.height = nextBase.height;
+      tmp.getContext("2d")?.putImageData(nextBase, 0, 0);
+      ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
+    }
+    drawCanvasStrokes(ctx, strokes ?? strokesRef.current);
+  }, []);
+
   const captureSnapshot = useCallback((): DocumentSnapshot | null => {
     const canvas = annotCanvasRef.current;
-    if (!canvas || canvas.width === 0) return null;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
+    if (!canvas || canvas.width === 0 || !baseImageDataRef.current) return null;
     return {
-      imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      baseImageData: cloneImageData(baseImageDataRef.current),
       canvasWidth: canvas.width,
       canvasHeight: canvas.height,
       notes: notesRef.current.map(n => ({ ...n })),
       textAnnotations: textAnnotationsRef.current.map(t => ({ ...t })),
       pictures: picturesRef.current.map(p => ({ ...p })),
+      strokes: strokesRef.current.map(cloneCanvasStroke),
     };
   }, []);
 
@@ -958,19 +1234,19 @@ export default function EditorPage() {
     if (!canvas) return;
     canvas.width = snapshot.canvasWidth;
     canvas.height = snapshot.canvasHeight;
-    canvas.getContext("2d")?.putImageData(snapshot.imageData, 0, 0);
+    baseImageDataRef.current = cloneImageData(snapshot.baseImageData);
+    strokesRef.current = snapshot.strokes.map(cloneCanvasStroke);
+    redrawAnnotationLayer(baseImageDataRef.current, strokesRef.current);
     setNotes(snapshot.notes.map(n => ({ ...n })));
     setTextAnnotations(snapshot.textAnnotations.map(t => ({ ...t })));
     setPictures(snapshot.pictures.map(p => ({ ...p })));
-  }, []);
+  }, [redrawAnnotationLayer]);
 
   const savePageState = useCallback((num: number) => {
     const annC = annotCanvasRef.current;
-    if (!annC || annC.width === 0 || num <= 0) return;
-    const ctx = annC.getContext("2d");
-    if (!ctx) return;
+    if (!annC || annC.width === 0 || num <= 0 || !baseImageDataRef.current) return;
     pageStoreRef.current.set(num, {
-      imageData: ctx.getImageData(0, 0, annC.width, annC.height),
+      baseImageData: cloneImageData(baseImageDataRef.current),
       canvasWidth: annC.width,
       canvasHeight: annC.height,
       undoStack: [...undoListRef.current],
@@ -978,6 +1254,7 @@ export default function EditorPage() {
       notes: notesRef.current.map(n => ({ ...n })),
       textAnnotations: textAnnotationsRef.current.map(t => ({ ...t })),
       pictures: picturesRef.current.map(p => ({ ...p })),
+      strokes: strokesRef.current.map(cloneCanvasStroke),
     });
   }, []);
 
@@ -989,16 +1266,9 @@ export default function EditorPage() {
     if (!ctx) return;
 
     if (stored) {
-      ctx.clearRect(0, 0, annC.width, annC.height);
-      if (stored.imageData.width === annC.width && stored.imageData.height === annC.height) {
-        ctx.putImageData(stored.imageData, 0, 0);
-      } else {
-        const tmp = document.createElement("canvas");
-        tmp.width = stored.imageData.width;
-        tmp.height = stored.imageData.height;
-        tmp.getContext("2d")!.putImageData(stored.imageData, 0, 0);
-        ctx.drawImage(tmp, 0, 0, annC.width, annC.height);
-      }
+      baseImageDataRef.current = cloneImageData(stored.baseImageData);
+      strokesRef.current = stored.strokes.map(cloneCanvasStroke);
+      redrawAnnotationLayer(baseImageDataRef.current, strokesRef.current);
       undoListRef.current = stored.undoStack.length ? [...stored.undoStack] : [];
       redoListRef.current = [...stored.redoStack];
       if (!undoListRef.current.length) saveState();
@@ -1007,6 +1277,8 @@ export default function EditorPage() {
       setPictures((stored.pictures ?? []).map(p => ({ ...p })));
     } else {
       ctx.clearRect(0, 0, annC.width, annC.height);
+      baseImageDataRef.current = createEmptyImageData(annC.width, annC.height);
+      strokesRef.current = [];
       undoListRef.current = [];
       redoListRef.current = [];
       saveState();
@@ -1014,7 +1286,344 @@ export default function EditorPage() {
       setTextAnnotations([]);
       setPictures([]);
     }
-  }, [saveState]);
+  }, [redrawAnnotationLayer, saveState]);
+
+  const renderPageBackgroundDataUrl = useCallback(async (pageIndex: number) => {
+    const source = pagesRef.current[pageIndex];
+    if (!source) throw new Error("Page not found");
+    const page = await source.doc.getPage(source.pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not prepare background canvas");
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return {
+      dataUrl: canvas.toDataURL("image/png"),
+      width: canvas.width,
+      height: canvas.height,
+    };
+  }, []);
+
+  const serializeCloudState = useCallback(async (): Promise<CloudEditorState> => {
+    savePageState(pageNumRef.current);
+    const pages: CloudPageSnapshot[] = [];
+
+    for (let index = 0; index < pagesRef.current.length; index += 1) {
+      const source = pagesRef.current[index];
+      const stored = pageStoreRef.current.get(index + 1);
+      const background = await renderPageBackgroundDataUrl(index);
+      const overlayDataUrl = stored ? imageDataToDataUrl(stored.baseImageData) : (() => {
+        const blank = document.createElement("canvas");
+        blank.width = background.width;
+        blank.height = background.height;
+        return blank.toDataURL("image/png");
+      })();
+
+      pages.push({
+        pageNumber: index + 1,
+        name: source.name,
+        backgroundDataUrl: background.dataUrl,
+        overlayDataUrl,
+        canvasWidth: stored?.canvasWidth ?? background.width,
+        canvasHeight: stored?.canvasHeight ?? background.height,
+        notes: stored?.notes.map(note => ({ ...note })) ?? [],
+        textAnnotations: stored?.textAnnotations.map(annotation => ({ ...annotation })) ?? [],
+        pictures: stored?.pictures.map(picture => ({ ...picture })) ?? [],
+        strokes: stored?.strokes.map(cloneCanvasStroke) ?? [],
+      });
+    }
+
+    return {
+      version: 1,
+      docTitle,
+      docSubtitle,
+      totalPages: pages.length,
+      pageNum: pageNumRef.current,
+      includePageNumbers: includePageNumbersRef.current,
+      darkMode: darkModeRef.current,
+      viewMode: viewModeRef.current,
+      zoomLevel: zoomLevelRef.current,
+      sourceFiles: sourceFilesRef.current,
+      pages,
+    };
+  }, [docSubtitle, docTitle, renderPageBackgroundDataUrl, savePageState]);
+
+  const hydrateCloudState = useCallback(async (payload: CloudEditorState) => {
+    const hydratedPages = await Promise.all(payload.pages.map(async page => ({
+      doc: createImagePdfDocument(await loadImageFromDataUrl(page.backgroundDataUrl)),
+      pageNumber: 1,
+      name: page.name || `Page ${page.pageNumber}`,
+    })));
+
+    const hydratedStoreEntries = await Promise.all(payload.pages.map(async page => {
+      const imageData = await dataUrlToImageData(page.overlayDataUrl, page.canvasWidth, page.canvasHeight);
+      return [
+        page.pageNumber,
+        {
+          baseImageData: imageData,
+          canvasWidth: page.canvasWidth,
+          canvasHeight: page.canvasHeight,
+          undoStack: [],
+          redoStack: [],
+          notes: page.notes.map(note => ({ ...note })),
+          textAnnotations: page.textAnnotations.map(annotation => ({ ...annotation })),
+          pictures: page.pictures.map(picture => ({ ...picture })),
+          strokes: (page.strokes ?? []).map(stroke => stroke.kind === "pencil"
+            ? { ...stroke, points: stroke.points.map(point => ({ ...point })) }
+            : { ...stroke, boxes: stroke.boxes.map(box => ({ ...box })) }),
+        } satisfies PageState,
+      ] as const;
+    }));
+
+    pagesRef.current = hydratedPages;
+    pdfDocRef.current = hydratedPages[0]?.doc ?? null;
+    pageStoreRef.current = new Map<number, PageState>(hydratedStoreEntries);
+    undoListRef.current = [];
+    redoListRef.current = [];
+    setNotes([]);
+    setTextAnnotations([]);
+    setPictures([]);
+    setDocTitle(payload.docTitle || "Untitled document");
+    setDocSubtitle(payload.docSubtitle || "");
+    setIncludePageNumbers(payload.includePageNumbers);
+    setDarkMode(payload.darkMode);
+    setViewMode(payload.viewMode);
+    setZoomLevel(payload.zoomLevel);
+    setSourceFiles(payload.sourceFiles ?? []);
+    setTotalPages(payload.totalPages || hydratedPages.length || 1);
+    setIsPdfLoaded(hydratedPages.length > 0);
+    setSelectedObject(null);
+    setEditingTextId(null);
+
+    const nextPage = Math.max(1, Math.min(payload.pageNum || 1, hydratedPages.length || 1));
+    requestAnimationFrame(() => {
+      renderPageRef.current(nextPage);
+      setLastSavedLabel("Loaded from cloud");
+    });
+  }, []);
+
+  const saveCloudDocument = useCallback(async (mode: "manual" | "auto" = "manual") => {
+    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current || !isPdfLoadedRef.current) return;
+    try {
+      if (mode === "manual") {
+        setIsSaving(true);
+        setLastSavedLabel("Saving to cloud...");
+      }
+
+      const payload = await serializeCloudState();
+      const response = await fetch("/api/cloud-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authSessionRef.current?.access_token ? { Authorization: `Bearer ${authSessionRef.current.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          documentId: cloudDocumentIdRef.current,
+          browserKey: cloudBrowserKeyRef.current,
+          title: docTitle,
+          payload,
+        }),
+      });
+      const data = await response.json() as { document?: CloudDocumentRecord; error?: string };
+
+      if (!response.ok || !data.document) {
+        throw new Error(data.error || "Could not save cloud draft");
+      }
+
+      cloudDocumentIdRef.current = data.document.id;
+      setCloudDocumentId(data.document.id);
+      window.localStorage.setItem("colora-cloud-document-id", data.document.id);
+      setLastSavedLabel(`Cloud saved ${new Date(data.document.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      if (mode === "manual") toast("Cloud draft saved");
+    } catch {
+      if (mode === "manual") toast("Could not save cloud draft");
+      setLastSavedLabel("Cloud save failed");
+    } finally {
+      if (mode === "manual") setIsSaving(false);
+    }
+  }, [cloudDraftsEnabled, docTitle, serializeCloudState, toast]);
+
+  const uploadSourceFilesToCloud = useCallback(async (files: FileList | File[]) => {
+    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) return;
+    const uploaded: CloudSourceFile[] = [];
+    for (const file of Array.from(files)) {
+      const existing = sourceFilesRef.current.find(item =>
+        item.name === file.name && item.size === file.size && item.mimeType === (file.type || "application/octet-stream")
+      );
+      if (existing) {
+        uploaded.push(existing);
+        continue;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("browserKey", cloudBrowserKeyRef.current);
+      if (cloudDocumentIdRef.current) formData.append("documentId", cloudDocumentIdRef.current);
+
+      const response = await fetch("/api/cloud-storage", {
+        method: "POST",
+        headers: authSessionRef.current?.access_token ? {
+          Authorization: `Bearer ${authSessionRef.current.access_token}`,
+        } : undefined,
+        body: formData,
+      });
+      const data = await response.json() as { file?: CloudSourceFile; error?: string };
+      if (!response.ok || !data.file) {
+        throw new Error(data.error || "Could not upload file");
+      }
+      uploaded.push(data.file);
+    }
+
+    if (uploaded.length) {
+      const next = uniqueSourceFiles([...sourceFilesRef.current, ...uploaded]);
+      setSourceFiles(next);
+      sourceFilesRef.current = next;
+    }
+  }, [cloudDraftsEnabled]);
+
+  const loadCloudDocument = useCallback(async (silent = false) => {
+    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) {
+      if (!silent) toast("Cloud drafts unavailable");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      setLastSavedLabel("Loading cloud draft...");
+      const params = new URLSearchParams({ browserKey: cloudBrowserKeyRef.current });
+      if (cloudDocumentIdRef.current) params.set("documentId", cloudDocumentIdRef.current);
+      const response = await fetch(`/api/cloud-document?${params.toString()}`, {
+        cache: "no-store",
+        headers: authSessionRef.current?.access_token ? {
+          Authorization: `Bearer ${authSessionRef.current.access_token}`,
+        } : undefined,
+      });
+      const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
+      if (!response.ok || !data.document) {
+        throw new Error(data.error || "Cloud draft not found");
+      }
+      cloudDocumentIdRef.current = data.document.id;
+      setCloudDocumentId(data.document.id);
+      window.localStorage.setItem("colora-cloud-document-id", data.document.id);
+      await hydrateCloudState(data.document.payload);
+      if (!silent) toast("Cloud draft loaded");
+    } catch {
+      if (!silent) toast("Could not load cloud draft");
+      setLastSavedLabel("Cloud load failed");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [cloudDraftsEnabled, hydrateCloudState, toast]);
+
+  const loadCloudDocumentById = useCallback(async (documentId: string) => {
+    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) {
+      toast("Cloud drafts unavailable");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      setLastSavedLabel("Opening document...");
+      const params = new URLSearchParams({
+        browserKey: cloudBrowserKeyRef.current,
+        documentId,
+      });
+      const response = await fetch(`/api/cloud-document?${params.toString()}`, {
+        cache: "no-store",
+        headers: authSessionRef.current?.access_token ? {
+          Authorization: `Bearer ${authSessionRef.current.access_token}`,
+        } : undefined,
+      });
+      const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
+      if (!response.ok || !data.document) {
+        throw new Error(data.error || "Document not found");
+      }
+      cloudDocumentIdRef.current = data.document.id;
+      setCloudDocumentId(data.document.id);
+      window.localStorage.setItem("colora-cloud-document-id", data.document.id);
+      await hydrateCloudState(data.document.payload);
+      setShowDocumentsMenu(false);
+      toast("Document opened");
+    } catch {
+      toast("Could not open document");
+      setLastSavedLabel("Open failed");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [cloudDraftsEnabled, hydrateCloudState, toast]);
+
+  const loadDocumentsList = useCallback(async () => {
+    if (!cloudDraftsEnabled || !authSessionRef.current?.access_token || !cloudBrowserKeyRef.current) {
+      setCloudDocuments([]);
+      return;
+    }
+    try {
+      setIsDocumentsLoading(true);
+      const params = new URLSearchParams({
+        browserKey: cloudBrowserKeyRef.current,
+        mode: "list",
+      });
+      const response = await fetch(`/api/cloud-document?${params.toString()}`, {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${authSessionRef.current.access_token}`,
+        },
+      });
+      const data = await response.json() as {
+        documents?: Array<{ id: string; title: string; updated_at: string; created_at: string }>;
+      };
+      if (!response.ok) throw new Error("Could not load documents");
+      setCloudDocuments(data.documents ?? []);
+    } catch {
+      setCloudDocuments([]);
+    } finally {
+      setIsDocumentsLoading(false);
+    }
+  }, [cloudDraftsEnabled]);
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      setShowDocumentsMenu(false);
+      setCloudDocuments([]);
+      return;
+    }
+    void loadDocumentsList();
+  }, [authUser?.id, loadDocumentsList]);
+
+  const sendMagicLink = useCallback(async () => {
+    if (!authEmail.trim()) {
+      toast("Enter your email first");
+      return;
+    }
+    try {
+      setIsAuthWorking(true);
+      await requestMagicLink(authEmail.trim());
+      toast("Magic link sent");
+      setLastSavedLabel("Check your email to sign in");
+    } catch {
+      toast("Could not send magic link");
+    } finally {
+      setIsAuthWorking(false);
+    }
+  }, [authEmail, toast]);
+
+  const signOutCloud = useCallback(async () => {
+    try {
+      setIsAuthWorking(true);
+      if (authSessionRef.current?.access_token) {
+        await signOutSupabaseSession(authSessionRef.current.access_token);
+      }
+    } catch {
+      // ignore remote logout issues
+    } finally {
+      setAuthSession(null);
+      setAuthUser(null);
+      storeSupabaseSession(null);
+      setIsAuthWorking(false);
+      setLastSavedLabel("Signed out");
+      toast("Signed out");
+    }
+  }, [toast]);
 
   const renderTextLayer = useCallback(async (page: PdfPage, vp: PdfViewport) => {
     const textLayerDiv = textLayerRef.current;
@@ -1060,6 +1669,8 @@ export default function EditorPage() {
       canvas.height = h;
       const ctx = canvas.getContext("2d");
       if (ctx) { ctx.lineCap = "round"; ctx.lineJoin = "round"; }
+      baseImageDataRef.current = createEmptyImageData(w, h);
+      strokesRef.current = [];
       undoListRef.current = [];
       redoListRef.current = [];
       saveState();
@@ -1471,6 +2082,24 @@ export default function EditorPage() {
     }
   }, []);
 
+  const eraseStrokesAtPoint = useCallback((x: number, y: number, radius: number) => {
+    const nextStrokes = strokesRef.current.filter(stroke => {
+      if (stroke.kind === "pencil") {
+        return !stroke.points.some(point => Math.hypot(point.x - x, point.y - y) <= radius);
+      }
+      return !stroke.boxes.some(box => {
+        const nearestX = Math.max(box.x, Math.min(x, box.x + box.w));
+        const nearestY = Math.max(box.y, Math.min(y, box.y + box.h));
+        return Math.hypot(x - nearestX, y - nearestY) <= radius;
+      });
+    });
+    const changed = nextStrokes.length !== strokesRef.current.length;
+    if (changed) {
+      strokesRef.current = nextStrokes;
+    }
+    return changed;
+  }, []);
+
   // ─── CANVAS DRAWING ───────────────────────────────────────────────
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const tool = activeToolRef.current;
@@ -1492,7 +2121,34 @@ export default function EditorPage() {
     shapeStartXRef.current = x; shapeStartYRef.current = y;
 
     saveState();
-    if (tool === "eraser") eraseObjectsAtPoint(x, y, brushWidthRef.current);
+    if (tool === "pencil") {
+      currentStrokeRef.current = {
+        id: crypto.randomUUID(),
+        kind: "pencil",
+        color: activeColorRef.current,
+        width: brushWidthRef.current,
+        points: [{ x, y }],
+      };
+    }
+    if (tool === "eraser") {
+      eraseObjectsAtPoint(x, y, brushWidthRef.current);
+      if (baseImageDataRef.current) {
+        const tmp = document.createElement("canvas");
+        tmp.width = canvas.width;
+        tmp.height = canvas.height;
+        const tmpCtx = tmp.getContext("2d");
+        if (tmpCtx) {
+          tmpCtx.putImageData(baseImageDataRef.current, 0, 0);
+          tmpCtx.globalCompositeOperation = "destination-out";
+          tmpCtx.beginPath();
+          tmpCtx.arc(x, y, brushWidthRef.current, 0, Math.PI * 2);
+          tmpCtx.fill();
+          baseImageDataRef.current = tmpCtx.getImageData(0, 0, canvas.width, canvas.height);
+        }
+      }
+      eraseStrokesAtPoint(x, y, brushWidthRef.current);
+      redrawAnnotationLayer();
+    }
   };
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1511,36 +2167,31 @@ export default function EditorPage() {
     const width = brushWidthRef.current;
 
     if (tool === "pencil") {
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.globalAlpha = 0.80 + Math.random() * 0.20;
-      ctx.globalCompositeOperation = "source-over";
-
-      // Quadratic bezier for smooth hand-drawn feel
-      const midX = (lastXRef.current + cx) / 2 + (Math.random() - 0.5) * 1.5;
-      const midY = (lastYRef.current + cy) / 2 + (Math.random() - 0.5) * 1.5;
-      ctx.beginPath();
-      ctx.moveTo(lastXRef.current, lastYRef.current);
-      ctx.quadraticCurveTo(midX, midY, cx, cy);
-      ctx.stroke();
-      ctx.restore();
-    } else if (tool === "eraser") {
-      ctx.save();
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.fillStyle = "rgba(0,0,0,1)";
-      ctx.beginPath();
-      ctx.arc(cx, cy, width, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      eraseObjectsAtPoint(cx, cy, width);
-    } else if (isShapeTool(tool)) {
-      // Redraw from pre-drag snapshot then draw current shape
-      if (undoListRef.current.length) {
-        restoreState(undoListRef.current[undoListRef.current.length - 1]);
+      if (currentStrokeRef.current) {
+        currentStrokeRef.current.points.push({ x: cx, y: cy });
+        redrawAnnotationLayer(baseImageDataRef.current, [...strokesRef.current, currentStrokeRef.current]);
       }
+    } else if (tool === "eraser") {
+      if (baseImageDataRef.current) {
+        const tmp = document.createElement("canvas");
+        tmp.width = canvas.width;
+        tmp.height = canvas.height;
+        const tmpCtx = tmp.getContext("2d");
+        if (tmpCtx) {
+          tmpCtx.putImageData(baseImageDataRef.current, 0, 0);
+          tmpCtx.globalCompositeOperation = "destination-out";
+          tmpCtx.fillStyle = "rgba(0,0,0,1)";
+          tmpCtx.beginPath();
+          tmpCtx.arc(cx, cy, width, 0, Math.PI * 2);
+          tmpCtx.fill();
+          baseImageDataRef.current = tmpCtx.getImageData(0, 0, canvas.width, canvas.height);
+        }
+      }
+      eraseObjectsAtPoint(cx, cy, width);
+      eraseStrokesAtPoint(cx, cy, width);
+      redrawAnnotationLayer();
+    } else if (isShapeTool(tool)) {
+      redrawAnnotationLayer();
       const x = shapeStartXRef.current;
       const y = shapeStartYRef.current;
       drawRoughShape(ctx, tool, x, y, cx, cy, color, shapeFillColorRef.current, shapeFillStyleRef.current);
@@ -1551,7 +2202,19 @@ export default function EditorPage() {
 
   const onMouseUp = () => {
     if (!isDrawingRef.current) return;
+    const canvas = annotCanvasRef.current;
     isDrawingRef.current = false;
+    if (activeToolRef.current === "pencil" && currentStrokeRef.current) {
+      strokesRef.current = [...strokesRef.current, cloneCanvasStroke(currentStrokeRef.current)];
+      currentStrokeRef.current = null;
+      redrawAnnotationLayer();
+    } else if (isShapeTool(activeToolRef.current) && canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        baseImageDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        redrawAnnotationLayer();
+      }
+    }
     saveState();
   };
 
@@ -1930,7 +2593,11 @@ export default function EditorPage() {
       const scaleX = canvas.width / cr.width;
       const scaleY = canvas.height / cr.height;
       saveState();
-      drawNaturalHighlightRects(ctx, rects, cr, scaleX, scaleY, activeColorRef.current);
+      const stroke = createNaturalHighlightStroke(rects, cr, scaleX, scaleY, activeColorRef.current);
+      if (stroke.boxes.length) {
+        strokesRef.current = [...strokesRef.current, stroke];
+        redrawAnnotationLayer();
+      }
       saveState();
       sel.removeAllRanges();
     };
@@ -1996,6 +2663,7 @@ export default function EditorPage() {
     if (!files?.length || !isPdfLoaded) return;
     try {
       savePageState(pageNum);
+      await uploadSourceFilesToCloud(files);
       const insertedPages = await readDocumentFiles(files);
       if (!insertedPages.length) return;
       shiftStoredPages(pageNum + 1, insertedPages.length);
@@ -2015,6 +2683,7 @@ export default function EditorPage() {
     if (!files?.length || !isPdfLoaded) return;
     try {
       savePageState(pageNum);
+      await uploadSourceFilesToCloud(files);
       const mergedPages = await readDocumentFiles(files);
       if (!mergedPages.length) return;
       pagesRef.current.push(...mergedPages);
@@ -2033,6 +2702,9 @@ export default function EditorPage() {
     if (!files?.length) return;
     toast("Loading file...");
     try {
+      sourceFilesRef.current = [];
+      setSourceFiles([]);
+      await uploadSourceFilesToCloud(files);
       const loadedPages = await readDocumentFiles(files);
       if (!loadedPages.length) return;
       pagesRef.current = loadedPages;
@@ -2069,6 +2741,7 @@ export default function EditorPage() {
     setNotes([]);
     setTextAnnotations([]);
     setPictures([]);
+    setSourceFiles([]);
     setEditingTextId(null);
     setDocTitle("Untitled document");
     setDocSubtitle("");
@@ -2120,7 +2793,7 @@ export default function EditorPage() {
     };
 
     pageStoreRef.current.set(nextPage, {
-      imageData: ctx.createImageData(annC.width, annC.height),
+      baseImageData: ctx.createImageData(annC.width, annC.height),
       canvasWidth: annC.width,
       canvasHeight: annC.height,
       undoStack: [],
@@ -2128,6 +2801,7 @@ export default function EditorPage() {
       notes: [],
       textAnnotations: [nextAnnotation],
       pictures: [],
+      strokes: [],
     });
 
     setTotalPages(pagesRef.current.length);
@@ -2488,15 +3162,19 @@ export default function EditorPage() {
         if (!ctx) continue;
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
 
-        const state = pageStoreRef.current.get(i + 1);
-        if (state) {
-          const ann = document.createElement("canvas");
-          ann.width = state.canvasWidth;
-          ann.height = state.canvasHeight;
-          ann.getContext("2d")?.putImageData(state.imageData, 0, 0);
-          ctx.drawImage(ann, 0, 0, canvas.width, canvas.height);
-          await drawPicturesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
-          drawTextAnnotationsForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
+      const state = pageStoreRef.current.get(i + 1);
+      if (state) {
+        const ann = document.createElement("canvas");
+        ann.width = state.canvasWidth;
+        ann.height = state.canvasHeight;
+        const annCtx = ann.getContext("2d");
+        if (annCtx) {
+          annCtx.putImageData(state.baseImageData, 0, 0);
+          drawCanvasStrokes(annCtx, state.strokes);
+        }
+        ctx.drawImage(ann, 0, 0, canvas.width, canvas.height);
+        await drawPicturesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
+        drawTextAnnotationsForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
           drawNotesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
         }
         if (includePageNumbersRef.current) {
@@ -2698,6 +3376,34 @@ export default function EditorPage() {
   ]);
 
   useEffect(() => {
+    if (!cloudDraftsEnabled || !cloudReady || !isPdfLoaded) return;
+    if (cloudAutosaveTimerRef.current) window.clearTimeout(cloudAutosaveTimerRef.current);
+    cloudAutosaveTimerRef.current = window.setTimeout(() => {
+      void saveCloudDocument("auto");
+    }, 5000);
+    return () => {
+      if (cloudAutosaveTimerRef.current) window.clearTimeout(cloudAutosaveTimerRef.current);
+    };
+  }, [
+    cloudDraftsEnabled,
+    cloudReady,
+    docTitle,
+    docSubtitle,
+    notes,
+    textAnnotations,
+    pictures,
+    includePageNumbers,
+    darkMode,
+    viewMode,
+    zoomLevel,
+    pageNum,
+    totalPages,
+    selectedObject,
+    isPdfLoaded,
+    saveCloudDocument,
+  ]);
+
+  useEffect(() => {
     const raw = window.localStorage.getItem("colora-editor-state");
     if (!raw) return;
     try {
@@ -2718,6 +3424,13 @@ export default function EditorPage() {
       // Ignore malformed local state.
     }
   }, []);
+
+  useEffect(() => {
+    if (!cloudDraftsEnabled || !cloudReady) return;
+    const raw = window.localStorage.getItem("colora-editor-state");
+    if (raw) return;
+    void loadCloudDocument(true);
+  }, [cloudDraftsEnabled, cloudReady, loadCloudDocument]);
 
   // ─── THEME ────────────────────────────────────────────────────────
   const dm = darkMode;
@@ -3217,6 +3930,191 @@ export default function EditorPage() {
 
         {/* Right actions */}
         <div style={{ display: isPdfLoaded ? "flex" : "none", alignItems: "center", gap: "8px" }}>
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: "2px",
+            marginRight: "6px",
+            minWidth: "138px",
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: 900, color: c.docMuted }}>
+              {lastSavedLabel}
+            </span>
+            <span style={{ fontSize: "10px", color: c.docMuted, opacity: 0.82 }}>
+              {cloudDraftsEnabled
+                ? authUser?.email
+                  ? `Signed in as ${authUser.email}`
+                  : cloudDocumentId
+                    ? "Cloud draft connected"
+                    : "Cloud draft ready"
+                : "Local autosave only"}
+            </span>
+          </div>
+          {cloudDraftsEnabled && (
+            <>
+              {authUser ? (
+                <>
+                  <div style={{ position: "relative" }}>
+                    <button onClick={() => {
+                      const next = !showDocumentsMenu;
+                      setShowDocumentsMenu(next);
+                      if (!showDocumentsMenu) void loadDocumentsList();
+                    }} title="My documents" style={{
+                      height: "36px", border: `1px solid ${c.headerBorder}`,
+                      borderRadius: "10px", background: "transparent", cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: c.docMuted, transition: "all 0.15s", padding: "0 12px",
+                      fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
+                    }}>
+                      My documents
+                    </button>
+                    {showDocumentsMenu && (
+                      <div style={{
+                        position: "absolute",
+                        top: "44px",
+                        right: 0,
+                        width: "280px",
+                        maxHeight: "360px",
+                        overflowY: "auto",
+                        borderRadius: "16px",
+                        border: `1px solid ${c.headerBorder}`,
+                        background: c.panelBg,
+                        boxShadow: "0 18px 48px rgba(28,30,38,0.14)",
+                        padding: "8px",
+                        zIndex: 120,
+                      }}>
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "6px 8px 10px",
+                        }}>
+                          <span style={{ fontSize: "11px", fontWeight: 900, color: c.docMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                            My documents
+                          </span>
+                          <button
+                            onClick={() => void loadDocumentsList()}
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              color: c.docMuted,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                              fontSize: "11px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                        {isDocumentsLoading ? (
+                          <div style={{ padding: "14px 10px", fontSize: "12px", color: c.docMuted }}>Loading documents...</div>
+                        ) : cloudDocuments.length ? (
+                          cloudDocuments.map(document => (
+                            <button
+                              key={document.id}
+                              onClick={() => void loadCloudDocumentById(document.id)}
+                              style={{
+                                width: "100%",
+                                border: "none",
+                                background: document.id === cloudDocumentId ? c.toolActive : "transparent",
+                                color: document.id === cloudDocumentId ? c.toolActiveTxt : c.docText,
+                                borderRadius: "12px",
+                                padding: "10px",
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "flex-start",
+                                gap: "4px",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              <span style={{ fontSize: "12px", fontWeight: 800 }}>
+                                {document.title || "Untitled document"}
+                              </span>
+                              <span style={{ fontSize: "10px", opacity: 0.8 }}>
+                                Updated {new Date(document.updated_at).toLocaleString([], {
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div style={{ padding: "14px 10px", fontSize: "12px", color: c.docMuted }}>
+                            No cloud documents yet.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => void signOutCloud()} title="Sign out" style={{
+                    height: "36px", border: `1px solid ${c.headerBorder}`,
+                    borderRadius: "10px", background: "transparent", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: c.docMuted, transition: "all 0.15s", padding: "0 12px",
+                    fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
+                  }}>
+                    {isAuthWorking ? "Working..." : "Sign out"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <input
+                    value={authEmail}
+                    onChange={e => setAuthEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    style={{
+                      height: "36px",
+                      width: "170px",
+                      borderRadius: "10px",
+                      border: `1px solid ${c.headerBorder}`,
+                      background: c.panelBg,
+                      color: c.docText,
+                      padding: "0 12px",
+                      fontFamily: "inherit",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      outline: "none",
+                    }}
+                  />
+                  <button onClick={() => void sendMagicLink()} title="Send magic link" style={{
+                    height: "36px", border: "none",
+                    borderRadius: "10px", background: dm ? "#2B3142" : "#F4EDFf", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: dm ? "#F2F4F8" : "#5E5D6A", transition: "all 0.15s", padding: "0 12px",
+                    fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
+                    opacity: isAuthWorking ? 0.72 : 1,
+                  }}>
+                    {isAuthWorking ? "Sending..." : "Sign in"}
+                  </button>
+                </>
+              )}
+              <button onClick={() => void loadCloudDocument()} title="Load cloud draft" style={{
+                height: "36px", border: `1px solid ${c.headerBorder}`,
+                borderRadius: "10px", background: "transparent", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: c.docMuted, transition: "all 0.15s", padding: "0 12px",
+                fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
+              }}>
+                Load cloud
+              </button>
+              <button onClick={() => void saveCloudDocument("manual")} title="Save cloud draft" style={{
+                height: "36px", border: "none",
+                borderRadius: "10px", background: dm ? "#2B3142" : "#EEE4FF", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: dm ? "#F2F4F8" : "#5E5D6A", transition: "all 0.15s", padding: "0 12px",
+                fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
+                opacity: isSaving ? 0.72 : 1,
+              }}>
+                {isSaving ? "Saving..." : "Save cloud"}
+              </button>
+            </>
+          )}
           <button onClick={undo} title="Undo" style={{
             width: "36px", height: "36px", border: `1px solid ${c.headerBorder}`,
             borderRadius: "9px", background: "transparent", cursor: "pointer",

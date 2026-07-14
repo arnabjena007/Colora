@@ -1,0 +1,95 @@
+export interface SupabaseSession {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  expires_at?: number;
+  token_type?: string;
+  user?: {
+    id: string;
+    email?: string;
+  };
+}
+
+export interface SupabaseUser {
+  id: string;
+  email?: string;
+}
+
+const getSupabasePublicEnv = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return { url, anonKey };
+};
+
+export const SUPABASE_SESSION_STORAGE_KEY = "colora-supabase-session";
+
+export const getStoredSupabaseSession = (): SupabaseSession | null => {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(SUPABASE_SESSION_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as SupabaseSession;
+  } catch {
+    return null;
+  }
+};
+
+export const storeSupabaseSession = (session: SupabaseSession | null) => {
+  if (typeof window === "undefined") return;
+  if (!session) {
+    window.localStorage.removeItem(SUPABASE_SESSION_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(SUPABASE_SESSION_STORAGE_KEY, JSON.stringify(session));
+};
+
+export const requestMagicLink = async (email: string) => {
+  const { url, anonKey } = getSupabasePublicEnv();
+  if (!url || !anonKey) throw new Error("Supabase auth is not configured");
+
+  const response = await fetch(`${url}/auth/v1/otp`, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email,
+      create_user: true,
+      email_redirect_to: typeof window !== "undefined" ? `${window.location.origin}/editor` : undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not send magic link");
+  }
+};
+
+export const fetchSupabaseUser = async (accessToken: string): Promise<SupabaseUser> => {
+  const { url, anonKey } = getSupabasePublicEnv();
+  if (!url || !anonKey) throw new Error("Supabase auth is not configured");
+
+  const response = await fetch(`${url}/auth/v1/user`, {
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) throw new Error("Could not fetch user");
+  return await response.json() as SupabaseUser;
+};
+
+export const signOutSupabaseSession = async (accessToken: string) => {
+  const { url, anonKey } = getSupabasePublicEnv();
+  if (!url || !anonKey) throw new Error("Supabase auth is not configured");
+
+  await fetch(`${url}/auth/v1/logout`, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+};

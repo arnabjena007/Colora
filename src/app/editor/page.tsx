@@ -3958,25 +3958,49 @@ export default function EditorPage() {
                 onClick={() => setShowWorkspacePanel(true)}
                 title="Workspace"
                 style={{
-                  height: "36px",
-                  border: `1px solid ${c.headerBorder}`,
-                  borderRadius: "10px",
-                  background: showWorkspacePanel ? c.toolActive : "transparent",
+                  height: "40px",
+                  minWidth: "136px",
+                  border: "none",
+                  borderRadius: "14px",
+                  background: showWorkspacePanel
+                    ? (dm ? "#3A4661" : "#DCC5FF")
+                    : (dm ? "#2B3142" : "#E5D4FF"),
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  color: showWorkspacePanel ? c.toolActiveTxt : c.docMuted,
-                  transition: "all 0.15s",
-                  padding: "0 12px",
+                  justifyContent: "space-between",
+                  color: dm ? "#F2F4F8" : "#5E5D6A",
+                  transition: "all 0.18s ease",
+                  padding: "0 14px 0 12px",
                   fontFamily: "inherit",
-                  fontSize: "11px",
-                  fontWeight: 800,
-                  gap: "6px",
+                  fontSize: "12px",
+                  fontWeight: 900,
+                  gap: "10px",
+                  boxShadow: showWorkspacePanel
+                    ? "0 10px 26px rgba(142,141,155,0.18)"
+                    : "0 8px 22px rgba(142,141,155,0.12)",
                 }}
               >
-                <Files size={14} />
-                Workspace
+                <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Files size={15} />
+                  Workspace
+                </span>
+                <span style={{
+                  minWidth: "22px",
+                  height: "22px",
+                  padding: "0 7px",
+                  borderRadius: "999px",
+                  background: dm ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.72)",
+                  color: dm ? "#FFFFFF" : "#6E63A8",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 900,
+                  letterSpacing: "0.04em",
+                }}>
+                  {authUser ? "ON" : "NEW"}
+                </span>
               </button>
               {authUser ? (
                 <>

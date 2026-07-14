@@ -11,6 +11,7 @@ import {
   getStoredSupabaseSession,
   signOutSupabaseSession,
   startGoogleSignIn,
+  SupabaseAuthConfigError,
   storeSupabaseSession,
   type SupabaseSession,
   type SupabaseUser,
@@ -1611,15 +1612,18 @@ export default function EditorPage() {
     void loadDocumentsList();
   }, [authUser?.id, loadDocumentsList]);
 
-  const signInWithGoogle = useCallback(async (): Promise<boolean> => {
+  const signInWithGoogle = useCallback(async (): Promise<{ ok: boolean; message: string }> => {
     try {
       setIsAuthWorking(true);
       startGoogleSignIn();
-      return true;
-    } catch {
-      toast("Could not start Google sign-in");
+      return { ok: true, message: "Redirecting to Google sign-in..." };
+    } catch (error) {
+      const message = error instanceof SupabaseAuthConfigError
+        ? error.message
+        : "Could not start Google sign-in. Check Supabase Google auth settings.";
+      toast(message);
       setIsAuthWorking(false);
-      return false;
+      return { ok: false, message };
     }
   }, [toast]);
 
@@ -4471,9 +4475,9 @@ export default function EditorPage() {
                   </button>
                   <button
                     onClick={async () => {
-                      const ok = await signInWithGoogle();
-                      setCloudDialogTone(ok ? "success" : "error");
-                      setCloudDialogMessage(ok ? "Redirecting to Google sign-in..." : "Could not start Google sign-in. Check Supabase Google auth settings and your env variables.");
+                      const result = await signInWithGoogle();
+                      setCloudDialogTone(result.ok ? "success" : "error");
+                      setCloudDialogMessage(result.message);
                     }}
                     style={{
                       height: "40px",

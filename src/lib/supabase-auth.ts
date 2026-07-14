@@ -15,6 +15,13 @@ export interface SupabaseUser {
   email?: string;
 }
 
+export class SupabaseAuthConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SupabaseAuthConfigError";
+  }
+}
+
 const getSupabasePublicEnv = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -67,7 +74,18 @@ export const requestMagicLink = async (email: string) => {
 
 export const startGoogleSignIn = () => {
   const { url, anonKey } = getSupabasePublicEnv();
-  if (!url || !anonKey) throw new Error("Supabase auth is not configured");
+  if (!url && !anonKey) {
+    throw new SupabaseAuthConfigError("Missing NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  }
+  if (!url) {
+    throw new SupabaseAuthConfigError("Missing NEXT_PUBLIC_SUPABASE_URL.");
+  }
+  if (!anonKey) {
+    throw new SupabaseAuthConfigError("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  }
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) {
+    throw new SupabaseAuthConfigError("NEXT_PUBLIC_SUPABASE_URL is invalid.");
+  }
   const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/editor` : "";
   const authUrl = `${url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
   if (typeof window !== "undefined") {

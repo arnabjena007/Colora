@@ -9,8 +9,8 @@ import type { CloudCanvasStroke, CloudDocumentRecord, CloudEditorState, CloudPag
 import {
   fetchSupabaseUser,
   getStoredSupabaseSession,
-  requestMagicLink,
   signOutSupabaseSession,
+  startGoogleSignIn,
   storeSupabaseSession,
   type SupabaseSession,
   type SupabaseUser,
@@ -974,7 +974,6 @@ export default function EditorPage() {
   const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
   const [cloudDocumentId, setCloudDocumentId] = useState<string | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
-  const [authEmail, setAuthEmail] = useState("");
   const [authSession, setAuthSession] = useState<SupabaseSession | null>(null);
   const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [isAuthWorking, setIsAuthWorking] = useState(false);
@@ -1596,7 +1595,7 @@ export default function EditorPage() {
     setCloudDialogTone("neutral");
     setCloudDialogMessage(
       mode === "sign-in"
-        ? "Enter your email to receive a magic link."
+        ? "Continue with Google to connect your cloud workspace."
         : mode === "load"
           ? "Choose how you want to open your cloud draft."
           : "Save the current draft to your cloud workspace."
@@ -1612,24 +1611,17 @@ export default function EditorPage() {
     void loadDocumentsList();
   }, [authUser?.id, loadDocumentsList]);
 
-  const sendMagicLink = useCallback(async (): Promise<boolean> => {
-    if (!authEmail.trim()) {
-      toast("Enter your email first");
-      return false;
-    }
+  const signInWithGoogle = useCallback(async (): Promise<boolean> => {
     try {
       setIsAuthWorking(true);
-      await requestMagicLink(authEmail.trim());
-      toast("Magic link sent");
-      setLastSavedLabel("Check your email to sign in");
+      startGoogleSignIn();
       return true;
     } catch {
-      toast("Could not send magic link");
-      return false;
-    } finally {
+      toast("Could not start Google sign-in");
       setIsAuthWorking(false);
+      return false;
     }
-  }, [authEmail, toast]);
+  }, [toast]);
 
   const signOutCloud = useCallback(async () => {
     try {
@@ -3578,6 +3570,9 @@ export default function EditorPage() {
   });
 
   const activeShape = isShapeTool(activeTool) ? activeTool : null;
+  const accountPreviewLabel = authUser?.email
+    ? authUser.email.split("@")[0].slice(0, 2).toUpperCase()
+    : "G";
   const activeShapeLabel = activeShape
     ? ({ rect: "Rect", ellipse: "Ellipse", diamond: "Diamond", line: "Line", arrow: "Arrow" } as Record<ShapeTool, string>)[activeShape]
     : "Shapes";
@@ -3977,196 +3972,80 @@ export default function EditorPage() {
           </div>
           {cloudDraftsEnabled && (
             <>
-              <button
-                onClick={() => setShowWorkspacePanel(true)}
-                title="Workspace"
-                style={{
-                  height: "40px",
-                  minWidth: "136px",
-                  border: "none",
-                  borderRadius: "14px",
-                  background: showWorkspacePanel
-                    ? (dm ? "#3A4661" : "#DCC5FF")
-                    : (dm ? "#2B3142" : "#E5D4FF"),
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  color: dm ? "#F2F4F8" : "#5E5D6A",
-                  transition: "all 0.18s ease",
-                  padding: "0 14px 0 12px",
-                  fontFamily: "inherit",
-                  fontSize: "12px",
-                  fontWeight: 900,
-                  gap: "10px",
-                  boxShadow: showWorkspacePanel
-                    ? "0 10px 26px rgba(142,141,155,0.18)"
-                    : "0 8px 22px rgba(142,141,155,0.12)",
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Files size={15} />
-                  Workspace
-                </span>
-                <span style={{
-                  minWidth: "22px",
-                  height: "22px",
-                  padding: "0 7px",
-                  borderRadius: "999px",
-                  background: dm ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.72)",
-                  color: dm ? "#FFFFFF" : "#6E63A8",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "10px",
-                  fontWeight: 900,
-                  letterSpacing: "0.04em",
-                }}>
-                  {authUser ? "ON" : "NEW"}
-                </span>
-              </button>
-              {authUser ? (
-                <>
-                  <div style={{ position: "relative" }}>
-                    <button onClick={() => {
-                      const next = !showDocumentsMenu;
-                      setShowDocumentsMenu(next);
-                      if (!showDocumentsMenu) void loadDocumentsList();
-                    }} title="My documents" style={{
-                      height: "36px", border: `1px solid ${c.headerBorder}`,
-                      borderRadius: "10px", background: "transparent", cursor: "pointer",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      color: c.docMuted, transition: "all 0.15s", padding: "0 12px",
-                      fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
-                    }}>
-                      My documents
-                    </button>
-                    {showDocumentsMenu && (
-                      <div style={{
-                        position: "absolute",
-                        top: "44px",
-                        right: 0,
-                        width: "280px",
-                        maxHeight: "360px",
-                        overflowY: "auto",
-                        borderRadius: "16px",
-                        border: `1px solid ${c.headerBorder}`,
-                        background: c.panelBg,
-                        boxShadow: "0 18px 48px rgba(28,30,38,0.14)",
-                        padding: "8px",
-                        zIndex: 120,
-                      }}>
-                        <div style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "6px 8px 10px",
-                        }}>
-                          <span style={{ fontSize: "11px", fontWeight: 900, color: c.docMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                            My documents
-                          </span>
-                          <button
-                            onClick={() => void loadDocumentsList()}
-                            style={{
-                              border: "none",
-                              background: "transparent",
-                              color: c.docMuted,
-                              cursor: "pointer",
-                              fontFamily: "inherit",
-                              fontSize: "11px",
-                              fontWeight: 800,
-                            }}
-                          >
-                            Refresh
-                          </button>
-                        </div>
-                        {isDocumentsLoading ? (
-                          <div style={{ padding: "14px 10px", fontSize: "12px", color: c.docMuted }}>Loading documents...</div>
-                        ) : cloudDocuments.length ? (
-                          cloudDocuments.map(document => (
-                            <button
-                              key={document.id}
-                              onClick={() => void loadCloudDocumentById(document.id)}
-                              style={{
-                                width: "100%",
-                                border: "none",
-                                background: document.id === cloudDocumentId ? c.toolActive : "transparent",
-                                color: document.id === cloudDocumentId ? c.toolActiveTxt : c.docText,
-                                borderRadius: "12px",
-                                padding: "10px",
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "flex-start",
-                                gap: "4px",
-                                cursor: "pointer",
-                                textAlign: "left",
-                                marginBottom: "4px",
-                              }}
-                            >
-                              <span style={{ fontSize: "12px", fontWeight: 800 }}>
-                                {document.title || "Untitled document"}
-                              </span>
-                              <span style={{ fontSize: "10px", opacity: 0.8 }}>
-                                Updated {new Date(document.updated_at).toLocaleString([], {
-                                  month: "short",
-                                  day: "numeric",
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </span>
-                            </button>
-                          ))
-                        ) : (
-                          <div style={{ padding: "14px 10px", fontSize: "12px", color: c.docMuted }}>
-                            No cloud documents yet.
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => void signOutCloud()} title="Sign out" style={{
-                    height: "36px", border: `1px solid ${c.headerBorder}`,
-                    borderRadius: "10px", background: "transparent", cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    color: c.docMuted, transition: "all 0.15s", padding: "0 12px",
-                    fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+                <button
+                  onClick={() => setShowWorkspacePanel(true)}
+                  title="Workspace"
+                  style={{
+                    height: "40px",
+                    minWidth: "136px",
+                    border: "none",
+                    borderRadius: "14px",
+                    background: showWorkspacePanel
+                      ? (dm ? "#3A4661" : "#DCC5FF")
+                      : (dm ? "#2B3142" : "#E5D4FF"),
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    color: dm ? "#F2F4F8" : "#5E5D6A",
+                    transition: "all 0.18s ease",
+                    padding: "0 14px 0 12px",
+                    fontFamily: "inherit",
+                    fontSize: "12px",
+                    fontWeight: 900,
+                    gap: "10px",
+                    boxShadow: showWorkspacePanel
+                      ? "0 10px 26px rgba(142,141,155,0.18)"
+                      : "0 8px 22px rgba(142,141,155,0.12)",
+                  }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Files size={15} />
+                    Workspace
+                  </span>
+                  <span style={{
+                    minWidth: "22px",
+                    height: "22px",
+                    padding: "0 7px",
+                    borderRadius: "999px",
+                    background: dm ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.72)",
+                    color: dm ? "#FFFFFF" : "#6E63A8",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "10px",
+                    fontWeight: 900,
+                    letterSpacing: "0.04em",
                   }}>
-                    {isAuthWorking ? "Working..." : "Sign out"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => openCloudDialog("sign-in")} title="Send magic link" style={{
-                    height: "36px", border: "none",
-                    borderRadius: "10px", background: dm ? "#2B3142" : "#F4EDFf", cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    color: dm ? "#F2F4F8" : "#5E5D6A", transition: "all 0.15s", padding: "0 12px",
-                    fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
-                    opacity: isAuthWorking ? 0.72 : 1,
-                  }}>
-                    {isAuthWorking ? "Sending..." : "Sign in"}
-                  </button>
-                </>
-              )}
-              <button onClick={() => openCloudDialog("load")} title="Load cloud draft" style={{
-                height: "36px", border: `1px solid ${c.headerBorder}`,
-                borderRadius: "10px", background: "transparent", cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: c.docMuted, transition: "all 0.15s", padding: "0 12px",
-                fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
-              }}>
-                Load cloud
-              </button>
-              <button onClick={() => openCloudDialog("save")} title="Save cloud draft" style={{
-                height: "36px", border: "none",
-                borderRadius: "10px", background: dm ? "#2B3142" : "#EEE4FF", cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: dm ? "#F2F4F8" : "#5E5D6A", transition: "all 0.15s", padding: "0 12px",
-                fontFamily: "inherit", fontSize: "11px", fontWeight: 800,
-                opacity: isSaving ? 0.72 : 1,
-              }}>
-                {isSaving ? "Saving..." : "Save cloud"}
-              </button>
+                    {authUser ? "ON" : "NEW"}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setShowWorkspacePanel(true)}
+                  title={authUser?.email || "Open workspace"}
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "50%",
+                    border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#E4D7FF"}`,
+                    background: authUser
+                      ? (dm ? "linear-gradient(180deg, #45516E 0%, #2E364A 100%)" : "linear-gradient(180deg, #F0E5FF 0%, #E1CFFF 100%)")
+                      : (dm ? "rgba(255,255,255,0.06)" : "#FFFFFF"),
+                    color: authUser ? (dm ? "#FFFFFF" : "#6E63A8") : c.docMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontFamily: "inherit",
+                    fontSize: "11px",
+                    fontWeight: 900,
+                    boxShadow: "0 6px 16px rgba(142,141,155,0.12)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {accountPreviewLabel}
+                </button>
+              </div>
             </>
           )}
           <button onClick={undo} title="Undo" style={{
@@ -4309,25 +4188,8 @@ export default function EditorPage() {
                 </button>
               ) : (
                 <>
-                  <input
-                    value={authEmail}
-                    onChange={e => setAuthEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    style={{
-                      height: "40px",
-                      borderRadius: "12px",
-                      border: `1px solid ${c.headerBorder}`,
-                      background: c.panelBg,
-                      color: c.docText,
-                      padding: "0 12px",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      outline: "none",
-                    }}
-                  />
                   <button
-                    onClick={() => void sendMagicLink()}
+                    onClick={() => void openCloudDialog("sign-in")}
                     style={{
                       height: "40px",
                       borderRadius: "12px",
@@ -4340,7 +4202,7 @@ export default function EditorPage() {
                       fontWeight: 800,
                     }}
                   >
-                    {isAuthWorking ? "Sending..." : "Send magic link"}
+                    {isAuthWorking ? "Opening..." : "Continue with Google"}
                   </button>
                 </>
               )}
@@ -4573,23 +4435,22 @@ export default function EditorPage() {
 
             {cloudDialogMode === "sign-in" && (
               <>
-                <input
-                  value={authEmail}
-                  onChange={e => setAuthEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  style={{
-                    height: "42px",
-                    borderRadius: "12px",
-                    border: `1px solid ${c.headerBorder}`,
-                    background: c.panelBg,
-                    color: c.docText,
-                    padding: "0 12px",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    outline: "none",
-                  }}
-                />
+                <div style={{
+                  borderRadius: "16px",
+                  border: `1px solid ${c.headerBorder}`,
+                  background: dm ? "rgba(255,255,255,0.04)" : "#FAF8FF",
+                  padding: "14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                }}>
+                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>
+                    Use your Google account
+                  </span>
+                  <span style={{ fontSize: "12px", lineHeight: 1.6, color: c.docMuted }}>
+                    This keeps the header clean and connects your documents, source files, and cloud drafts to one account.
+                  </span>
+                </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
                   <button
                     onClick={() => setCloudDialogMode(null)}
@@ -4610,9 +4471,9 @@ export default function EditorPage() {
                   </button>
                   <button
                     onClick={async () => {
-                      const ok = await sendMagicLink();
+                      const ok = await signInWithGoogle();
                       setCloudDialogTone(ok ? "success" : "error");
-                      setCloudDialogMessage(ok ? "Magic link sent. Check your inbox and come back to this tab after signing in." : "Could not send magic link. Check the email, Supabase auth settings, and your env variables.");
+                      setCloudDialogMessage(ok ? "Redirecting to Google sign-in..." : "Could not start Google sign-in. Check Supabase Google auth settings and your env variables.");
                     }}
                     style={{
                       height: "40px",
@@ -4627,7 +4488,7 @@ export default function EditorPage() {
                       fontWeight: 800,
                     }}
                   >
-                    {isAuthWorking ? "Sending..." : "Send magic link"}
+                    {isAuthWorking ? "Opening..." : "Continue with Google"}
                   </button>
                 </div>
               </>

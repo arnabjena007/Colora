@@ -65,6 +65,16 @@ export const requestMagicLink = async (email: string) => {
   }
 };
 
+export const startGoogleSignIn = () => {
+  const { url, anonKey } = getSupabasePublicEnv();
+  if (!url || !anonKey) throw new Error("Supabase auth is not configured");
+  const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/editor` : "";
+  const authUrl = `${url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  if (typeof window !== "undefined") {
+    window.location.assign(authUrl);
+  }
+};
+
 export const fetchSupabaseUser = async (accessToken: string): Promise<SupabaseUser> => {
   const { url, anonKey } = getSupabasePublicEnv();
   if (!url || !anonKey) throw new Error("Supabase auth is not configured");

@@ -988,6 +988,9 @@ export default function EditorPage() {
   const [showDocumentsMenu, setShowDocumentsMenu] = useState(false);
   const [isDocumentsLoading, setIsDocumentsLoading] = useState(false);
   const [showWorkspacePanel, setShowWorkspacePanel] = useState(false);
+  const [cloudDialogMode, setCloudDialogMode] = useState<"sign-in" | "load" | "save" | null>(null);
+  const [cloudDialogMessage, setCloudDialogMessage] = useState("");
+  const [cloudDialogTone, setCloudDialogTone] = useState<"neutral" | "success" | "error">("neutral");
 
   const annotCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1405,8 +1408,8 @@ export default function EditorPage() {
     });
   }, []);
 
-  const saveCloudDocument = useCallback(async (mode: "manual" | "auto" = "manual") => {
-    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current || !isPdfLoadedRef.current) return;
+  const saveCloudDocument = useCallback(async (mode: "manual" | "auto" = "manual"): Promise<boolean> => {
+    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current || !isPdfLoadedRef.current) return false;
     try {
       if (mode === "manual") {
         setIsSaving(true);
@@ -1438,9 +1441,11 @@ export default function EditorPage() {
       window.localStorage.setItem("colora-cloud-document-id", data.document.id);
       setLastSavedLabel(`Cloud saved ${new Date(data.document.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       if (mode === "manual") toast("Cloud draft saved");
+      return true;
     } catch {
       if (mode === "manual") toast("Could not save cloud draft");
       setLastSavedLabel("Cloud save failed");
+      return false;
     } finally {
       if (mode === "manual") setIsSaving(false);
     }
@@ -1484,10 +1489,10 @@ export default function EditorPage() {
     }
   }, [cloudDraftsEnabled]);
 
-  const loadCloudDocument = useCallback(async (silent = false) => {
+  const loadCloudDocument = useCallback(async (silent = false): Promise<boolean> => {
     if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) {
       if (!silent) toast("Cloud drafts unavailable");
-      return;
+      return false;
     }
     try {
       setIsSaving(true);
@@ -1509,18 +1514,20 @@ export default function EditorPage() {
       window.localStorage.setItem("colora-cloud-document-id", data.document.id);
       await hydrateCloudState(data.document.payload);
       if (!silent) toast("Cloud draft loaded");
+      return true;
     } catch {
       if (!silent) toast("Could not load cloud draft");
       setLastSavedLabel("Cloud load failed");
+      return false;
     } finally {
       setIsSaving(false);
     }
   }, [cloudDraftsEnabled, hydrateCloudState, toast]);
 
-  const loadCloudDocumentById = useCallback(async (documentId: string) => {
+  const loadCloudDocumentById = useCallback(async (documentId: string): Promise<boolean> => {
     if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) {
       toast("Cloud drafts unavailable");
-      return;
+      return false;
     }
     try {
       setIsSaving(true);
@@ -1545,9 +1552,11 @@ export default function EditorPage() {
       await hydrateCloudState(data.document.payload);
       setShowDocumentsMenu(false);
       toast("Document opened");
+      return true;
     } catch {
       toast("Could not open document");
       setLastSavedLabel("Open failed");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -1582,6 +1591,18 @@ export default function EditorPage() {
     }
   }, [cloudDraftsEnabled]);
 
+  const openCloudDialog = useCallback((mode: "sign-in" | "load" | "save") => {
+    setCloudDialogMode(mode);
+    setCloudDialogTone("neutral");
+    setCloudDialogMessage(
+      mode === "sign-in"
+        ? "Enter your email to receive a magic link."
+        : mode === "load"
+          ? "Choose how you want to open your cloud draft."
+          : "Save the current draft to your cloud workspace."
+    );
+  }, []);
+
   useEffect(() => {
     if (!authUser?.id) {
       setShowDocumentsMenu(false);
@@ -1591,18 +1612,20 @@ export default function EditorPage() {
     void loadDocumentsList();
   }, [authUser?.id, loadDocumentsList]);
 
-  const sendMagicLink = useCallback(async () => {
+  const sendMagicLink = useCallback(async (): Promise<boolean> => {
     if (!authEmail.trim()) {
       toast("Enter your email first");
-      return;
+      return false;
     }
     try {
       setIsAuthWorking(true);
       await requestMagicLink(authEmail.trim());
       toast("Magic link sent");
       setLastSavedLabel("Check your email to sign in");
+      return true;
     } catch {
       toast("Could not send magic link");
+      return false;
     } finally {
       setIsAuthWorking(false);
     }
@@ -4113,25 +4136,7 @@ export default function EditorPage() {
                 </>
               ) : (
                 <>
-                  <input
-                    value={authEmail}
-                    onChange={e => setAuthEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    style={{
-                      height: "36px",
-                      width: "170px",
-                      borderRadius: "10px",
-                      border: `1px solid ${c.headerBorder}`,
-                      background: c.panelBg,
-                      color: c.docText,
-                      padding: "0 12px",
-                      fontFamily: "inherit",
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      outline: "none",
-                    }}
-                  />
-                  <button onClick={() => void sendMagicLink()} title="Send magic link" style={{
+                  <button onClick={() => openCloudDialog("sign-in")} title="Send magic link" style={{
                     height: "36px", border: "none",
                     borderRadius: "10px", background: dm ? "#2B3142" : "#F4EDFf", cursor: "pointer",
                     display: "flex", alignItems: "center", justifyContent: "center",
@@ -4143,7 +4148,7 @@ export default function EditorPage() {
                   </button>
                 </>
               )}
-              <button onClick={() => void loadCloudDocument()} title="Load cloud draft" style={{
+              <button onClick={() => openCloudDialog("load")} title="Load cloud draft" style={{
                 height: "36px", border: `1px solid ${c.headerBorder}`,
                 borderRadius: "10px", background: "transparent", cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -4152,7 +4157,7 @@ export default function EditorPage() {
               }}>
                 Load cloud
               </button>
-              <button onClick={() => void saveCloudDocument("manual")} title="Save cloud draft" style={{
+              <button onClick={() => openCloudDialog("save")} title="Save cloud draft" style={{
                 height: "36px", border: "none",
                 borderRadius: "10px", background: dm ? "#2B3142" : "#EEE4FF", cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -4483,6 +4488,276 @@ export default function EditorPage() {
               </div>
             </div>
           </aside>
+        </>
+      )}
+
+      {cloudDialogMode && (
+        <>
+          <div
+            onClick={() => setCloudDialogMode(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(18, 22, 32, 0.2)",
+              backdropFilter: "blur(4px)",
+              zIndex: 125,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(460px, calc(100vw - 28px))",
+              background: c.panelBg,
+              border: `1px solid ${c.headerBorder}`,
+              borderRadius: "24px",
+              boxShadow: "0 34px 90px rgba(28,30,38,0.18)",
+              padding: "18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px",
+              zIndex: 130,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase" }}>
+                  Cloud action
+                </span>
+                <span style={{ fontSize: "18px", fontWeight: 800, color: c.docText }}>
+                  {cloudDialogMode === "sign-in" ? "Sign in to Colora" : cloudDialogMode === "load" ? "Load cloud draft" : "Save cloud draft"}
+                </span>
+              </div>
+              <button
+                onClick={() => setCloudDialogMode(null)}
+                style={{
+                  width: "34px",
+                  height: "34px",
+                  borderRadius: "12px",
+                  border: "none",
+                  background: c.toolActive,
+                  color: c.toolActiveTxt,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{
+              borderRadius: "16px",
+              padding: "12px 14px",
+              background:
+                cloudDialogTone === "error"
+                  ? (dm ? "rgba(126, 50, 63, 0.22)" : "#FFE9EE")
+                  : cloudDialogTone === "success"
+                    ? (dm ? "rgba(46, 102, 77, 0.24)" : "#EAFBF1")
+                    : (dm ? "rgba(255,255,255,0.06)" : "#F6F3FF"),
+              color:
+                cloudDialogTone === "error"
+                  ? (dm ? "#FFD6DE" : "#8A2442")
+                  : cloudDialogTone === "success"
+                    ? (dm ? "#DDF8E8" : "#2F5D45")
+                    : c.docMuted,
+              fontSize: "12px",
+              fontWeight: 700,
+              lineHeight: 1.6,
+            }}>
+              {cloudDialogMessage}
+            </div>
+
+            {cloudDialogMode === "sign-in" && (
+              <>
+                <input
+                  value={authEmail}
+                  onChange={e => setAuthEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  style={{
+                    height: "42px",
+                    borderRadius: "12px",
+                    border: `1px solid ${c.headerBorder}`,
+                    background: c.panelBg,
+                    color: c.docText,
+                    padding: "0 12px",
+                    fontFamily: "inherit",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    outline: "none",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                  <button
+                    onClick={() => setCloudDialogMode(null)}
+                    style={{
+                      height: "40px",
+                      padding: "0 14px",
+                      borderRadius: "12px",
+                      border: `1px solid ${c.headerBorder}`,
+                      background: "transparent",
+                      color: c.docText,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ok = await sendMagicLink();
+                      setCloudDialogTone(ok ? "success" : "error");
+                      setCloudDialogMessage(ok ? "Magic link sent. Check your inbox and come back to this tab after signing in." : "Could not send magic link. Check the email, Supabase auth settings, and your env variables.");
+                    }}
+                    style={{
+                      height: "40px",
+                      padding: "0 14px",
+                      borderRadius: "12px",
+                      border: "none",
+                      background: dm ? "#2B3142" : "#EDE1FF",
+                      color: dm ? "#F2F4F8" : "#5E5D6A",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {isAuthWorking ? "Sending..." : "Send magic link"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {cloudDialogMode === "load" && (
+              <>
+                {authUser && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "240px", overflowY: "auto" }}>
+                    {cloudDocuments.length ? cloudDocuments.map(document => (
+                      <button
+                        key={document.id}
+                        onClick={async () => {
+                          const ok = await loadCloudDocumentById(document.id).then(() => true).catch(() => false);
+                          setCloudDialogTone(ok ? "success" : "error");
+                          setCloudDialogMessage(ok ? `Opened ${document.title || "Untitled document"}.` : "Could not open the selected cloud document.");
+                          if (ok) setCloudDialogMode(null);
+                        }}
+                        style={{
+                          width: "100%",
+                          border: `1px solid ${c.headerBorder}`,
+                          background: document.id === cloudDocumentId ? c.toolActive : "transparent",
+                          color: document.id === cloudDocumentId ? c.toolActiveTxt : c.docText,
+                          borderRadius: "14px",
+                          padding: "12px",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
+                        }}
+                      >
+                        <span style={{ fontSize: "12px", fontWeight: 800 }}>{document.title || "Untitled document"}</span>
+                        <span style={{ fontSize: "10px", opacity: 0.82 }}>
+                          Updated {new Date(document.updated_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </button>
+                    )) : (
+                      <div style={{ fontSize: "12px", color: c.docMuted }}>No cloud documents found for this account.</div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                  <button
+                    onClick={() => setCloudDialogMode(null)}
+                    style={{
+                      height: "40px",
+                      padding: "0 14px",
+                      borderRadius: "12px",
+                      border: `1px solid ${c.headerBorder}`,
+                      background: "transparent",
+                      color: c.docText,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ok = await loadCloudDocument();
+                      setCloudDialogTone(ok ? "success" : "error");
+                      setCloudDialogMessage(ok ? "Loaded the latest cloud draft." : "Could not load cloud draft.");
+                      if (ok) setCloudDialogMode(null);
+                    }}
+                    style={{
+                      height: "40px",
+                      padding: "0 14px",
+                      borderRadius: "12px",
+                      border: "none",
+                      background: dm ? "#2B3142" : "#EDE1FF",
+                      color: dm ? "#F2F4F8" : "#5E5D6A",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "12px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Load latest
+                  </button>
+                </div>
+              </>
+            )}
+
+            {cloudDialogMode === "save" && (
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button
+                  onClick={() => setCloudDialogMode(null)}
+                  style={{
+                    height: "40px",
+                    padding: "0 14px",
+                    borderRadius: "12px",
+                    border: `1px solid ${c.headerBorder}`,
+                    background: "transparent",
+                    color: c.docText,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const ok = await saveCloudDocument("manual");
+                    setCloudDialogTone(ok ? "success" : "error");
+                    setCloudDialogMessage(ok ? "Cloud draft saved successfully." : "Could not save cloud draft.");
+                    if (ok) setCloudDialogMode(null);
+                  }}
+                  style={{
+                    height: "40px",
+                    padding: "0 14px",
+                    borderRadius: "12px",
+                    border: "none",
+                    background: dm ? "#2B3142" : "#EDE1FF",
+                    color: dm ? "#F2F4F8" : "#5E5D6A",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                  }}
+                >
+                  {isSaving ? "Saving..." : "Save now"}
+                </button>
+              </div>
+            )}
+          </div>
         </>
       )}
 

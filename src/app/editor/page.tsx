@@ -4655,7 +4655,7 @@ export default function EditorPage() {
                 <button
                   type="button"
                   onClick={() => setShowWorkspacePanel(true)}
-                  title="Workspace"
+                  title={authUser?.email || "Open account"}
                   style={{
                     width: "100%",
                     border: "none",
@@ -4673,75 +4673,10 @@ export default function EditorPage() {
                     boxShadow: showWorkspacePanel ? "0 10px 24px rgba(142,141,155,0.2)" : "0 8px 18px rgba(142,141,155,0.1)",
                   }}
                 >
-                  <div style={{
-                    width: "28px",
-                    height: "28px",
-                    borderRadius: "10px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: showWorkspacePanel ? "rgba(255,255,255,0.22)" : (dm ? "rgba(255,255,255,0.08)" : "#FFFFFF"),
-                  }}>
-                    <Files size={18} />
-                  </div>
-                  <span>Cloud</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void openCloudDialog(authUser ? "load" : "sign-in")}
-                  title={authUser ? "Load cloud" : "Sign in"}
-                  style={{
-                    width: "100%",
-                    border: `1px solid ${c.sidebarBorder}`,
-                    borderRadius: "14px",
-                    background: c.panelBg,
-                    color: c.docText,
-                    padding: "9px 6px",
-                    cursor: "pointer",
-                    fontSize: "11px",
-                    fontWeight: 800,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {authUser ? "Load cloud" : "Sign in"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void openCloudDialog("save")}
-                  title="Save cloud"
-                  style={{
-                    width: "100%",
-                    border: `1px solid ${c.sidebarBorder}`,
-                    borderRadius: "14px",
-                    background: c.panelBg,
-                    color: c.docText,
-                    padding: "9px 6px",
-                    cursor: "pointer",
-                    fontSize: "11px",
-                    fontWeight: 800,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  Save cloud
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowWorkspacePanel(true)}
-                  title={authUser?.email || "Open account"}
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    background: "transparent",
-                    padding: 0,
-                    cursor: "pointer",
-                    display: "flex",
-                    justifyContent: "center",
-                  }}
-                >
                   <span
                     style={{
-                      width: "42px",
-                      height: "42px",
+                      width: "44px",
+                      height: "44px",
                       borderRadius: "50%",
                       overflow: "hidden",
                       border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#DFCFFF"}`,
@@ -4767,6 +4702,7 @@ export default function EditorPage() {
                       accountPreviewLabel
                     )}
                   </span>
+                  <span>{authUser ? "Account" : "Sign in"}</span>
                 </button>
               </div>
             )}

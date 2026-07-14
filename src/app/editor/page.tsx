@@ -4089,71 +4089,101 @@ export default function EditorPage() {
               background: dm ? "rgba(28,34,48,0.86)" : "#FBFAFF",
               display: "flex",
               flexDirection: "column",
-              gap: "10px",
+              gap: "12px",
             }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>
-                  {authUser?.email || "Not signed in"}
-                </span>
-                <span style={{ fontSize: "11px", color: c.docMuted }}>
-                  {authUser ? "Your documents are linked to your Supabase account." : "Sign in with a magic link to sync documents across devices."}
-                </span>
-              </div>
-              {authUser ? (
-                <button
-                  onClick={() => void signOutCloud()}
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div
                   style={{
-                    height: "38px",
-                    borderRadius: "12px",
-                    border: `1px solid ${c.headerBorder}`,
-                    background: "transparent",
-                    color: c.docText,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
-                    fontWeight: 800,
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                    border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#DFCFFF"}`,
+                    background: authUser
+                      ? (dm ? "linear-gradient(180deg, #45516E 0%, #2E364A 100%)" : "linear-gradient(180deg, #F0E5FF 0%, #E1CFFF 100%)")
+                      : (dm ? "#232938" : "#FFFFFF"),
+                    color: authUser ? (dm ? "#FFFFFF" : "#6E63A8") : c.docMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "13px",
+                    fontWeight: 900,
                   }}
                 >
-                  {isAuthWorking ? "Signing out..." : "Sign out"}
-                </button>
-              ) : (
-                <>
+                  {accountAvatarUrl ? (
+                    <img
+                      src={accountAvatarUrl}
+                      alt={authUser?.email || "Account avatar"}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  ) : (
+                    accountPreviewLabel
+                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {authUser?.email || "Not signed in"}
+                  </span>
+                  <span style={{ fontSize: "11px", color: c.docMuted }}>
+                    {authUser ? "Cloud sync is ready for this account." : "Sign in to sync your draft across devices."}
+                  </span>
+                </div>
+                {authUser ? (
+                  <button
+                    onClick={() => void signOutCloud()}
+                    style={{
+                      height: "34px",
+                      padding: "0 12px",
+                      borderRadius: "10px",
+                      border: `1px solid ${c.headerBorder}`,
+                      background: "transparent",
+                      color: c.docText,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "11px",
+                      fontWeight: 800,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {isAuthWorking ? "..." : "Log out"}
+                  </button>
+                ) : (
                   <button
                     onClick={() => void openCloudDialog("sign-in")}
                     style={{
-                      height: "40px",
-                      borderRadius: "12px",
+                      height: "34px",
+                      padding: "0 12px",
+                      borderRadius: "10px",
                       border: "none",
                       background: dm ? "#2B3142" : "#EDE1FF",
                       color: dm ? "#F2F4F8" : "#5E5D6A",
                       cursor: "pointer",
                       fontFamily: "inherit",
-                      fontSize: "12px",
+                      fontSize: "11px",
                       fontWeight: 800,
+                      flexShrink: 0,
                     }}
                   >
-                    {isAuthWorking ? "Opening..." : "Continue with Google"}
+                    {isAuthWorking ? "..." : "Sign in"}
                   </button>
-                </>
-              )}
-            </div>
+                )}
+              </div>
 
-            <div style={{
-              border: `1px solid ${c.headerBorder}`,
-              borderRadius: "18px",
-              padding: "14px",
-              background: dm ? "rgba(28,34,48,0.86)" : "#FBFAFF",
-              display: "flex",
-              flexDirection: "column",
-              gap: "10px",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Current draft</span>
-                  <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    {cloudDocumentId ? "Connected to a cloud document." : "No cloud document linked yet."}
-                  </span>
-                </div>
+              <div style={{
+                borderTop: `1px solid ${c.headerBorder}`,
+                paddingTop: "12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Current draft</span>
+                    <span style={{ fontSize: "11px", color: c.docMuted }}>
+                      {cloudDocumentId ? "Connected to a cloud document." : "No cloud document linked yet."}
+                    </span>
+                  </div>
                 <span style={{
                   padding: "6px 10px",
                   borderRadius: "999px",
@@ -4164,21 +4194,21 @@ export default function EditorPage() {
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                 }}>
-                  {authUser ? "Account sync" : "Browser draft"}
+                  {authUser ? "Synced" : "Browser only"}
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                 <button
                   onClick={() => void loadCloudDocument()}
                   style={{
-                    height: "38px",
+                    height: "36px",
                     borderRadius: "12px",
                     border: `1px solid ${c.headerBorder}`,
                     background: "transparent",
                     color: c.docText,
                     cursor: "pointer",
                     fontFamily: "inherit",
-                    fontSize: "12px",
+                    fontSize: "11px",
                     fontWeight: 800,
                   }}
                 >
@@ -4187,20 +4217,21 @@ export default function EditorPage() {
                 <button
                   onClick={() => void saveCloudDocument("manual")}
                   style={{
-                    height: "38px",
+                    height: "36px",
                     borderRadius: "12px",
                     border: "none",
                     background: dm ? "#2B3142" : "#EDE1FF",
                     color: dm ? "#F2F4F8" : "#5E5D6A",
                     cursor: "pointer",
                     fontFamily: "inherit",
-                    fontSize: "12px",
+                    fontSize: "11px",
                     fontWeight: 800,
                   }}
                 >
                   {isSaving ? "Saving..." : "Save cloud"}
                 </button>
               </div>
+            </div>
             </div>
 
             <div style={{
@@ -4650,7 +4681,7 @@ export default function EditorPage() {
             </div>
 
             {cloudDraftsEnabled && (
-              <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "8px", width: "100%", paddingTop: "10px" }}>
+              <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "8px", width: "100%", paddingTop: "18px" }}>
                 <div style={{ width: "100%", height: "1px", background: c.sidebarBorder, opacity: 0.9 }} />
                 <button
                   type="button"
@@ -4675,8 +4706,8 @@ export default function EditorPage() {
                 >
                   <span
                     style={{
-                      width: "44px",
-                      height: "44px",
+                      width: "38px",
+                      height: "38px",
                       borderRadius: "50%",
                       overflow: "hidden",
                       border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#DFCFFF"}`,
@@ -4687,7 +4718,7 @@ export default function EditorPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: "13px",
+                      fontSize: "12px",
                       fontWeight: 900,
                       boxShadow: "0 8px 18px rgba(142,141,155,0.16)",
                     }}

@@ -13,6 +13,12 @@ export interface SupabaseSession {
 export interface SupabaseUser {
   id: string;
   email?: string;
+  user_metadata?: {
+    avatar_url?: string;
+    picture?: string;
+    full_name?: string;
+    name?: string;
+  };
 }
 
 export class SupabaseAuthConfigError extends Error {
@@ -26,6 +32,22 @@ const getSupabasePublicEnv = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   return { url, anonKey };
+};
+
+const getAuthRedirectUrl = () => {
+  const explicitRedirect = process.env.NEXT_PUBLIC_AUTH_REDIRECT_URL?.trim();
+  if (explicitRedirect) return explicitRedirect;
+
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (siteUrl) return `${siteUrl.replace(/\/+$/, "")}/editor`;
+
+  if (typeof window === "undefined") return "https://colora-devo.vercel.app/editor";
+
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return `${window.location.origin}/editor`;
+  }
+
+  return "https://colora-devo.vercel.app/editor";
 };
 
 export const SUPABASE_SESSION_STORAGE_KEY = "colora-supabase-session";
@@ -63,7 +85,7 @@ export const requestMagicLink = async (email: string) => {
     body: JSON.stringify({
       email,
       create_user: true,
-      email_redirect_to: typeof window !== "undefined" ? `${window.location.origin}/editor` : undefined,
+      email_redirect_to: getAuthRedirectUrl(),
     }),
   });
 
@@ -86,7 +108,7 @@ export const startGoogleSignIn = () => {
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) {
     throw new SupabaseAuthConfigError("NEXT_PUBLIC_SUPABASE_URL is invalid.");
   }
-  const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/editor` : "";
+  const redirectTo = getAuthRedirectUrl();
   const authUrl = `${url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
   if (typeof window !== "undefined") {
     window.location.assign(authUrl);

@@ -3574,9 +3574,13 @@ export default function EditorPage() {
   });
 
   const activeShape = isShapeTool(activeTool) ? activeTool : null;
-  const accountPreviewLabel = authUser?.email
-    ? authUser.email.split("@")[0].slice(0, 2).toUpperCase()
-    : "G";
+  const accountAvatarUrl = authUser?.user_metadata?.avatar_url || authUser?.user_metadata?.picture || "";
+  const accountPreviewLabel = (
+    authUser?.email?.trim()?.[0] ||
+    authUser?.user_metadata?.full_name?.trim()?.[0] ||
+    authUser?.user_metadata?.name?.trim()?.[0] ||
+    "G"
+  ).toUpperCase();
   const activeShapeLabel = activeShape
     ? ({ rect: "Rect", ellipse: "Ellipse", diamond: "Diamond", line: "Line", arrow: "Arrow" } as Record<ShapeTool, string>)[activeShape]
     : "Shapes";
@@ -3974,84 +3978,6 @@ export default function EditorPage() {
                 : "Local autosave only"}
             </span>
           </div>
-          {cloudDraftsEnabled && (
-            <>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
-                <button
-                  onClick={() => setShowWorkspacePanel(true)}
-                  title="Workspace"
-                  style={{
-                    height: "40px",
-                    minWidth: "136px",
-                    border: "none",
-                    borderRadius: "14px",
-                    background: showWorkspacePanel
-                      ? (dm ? "#3A4661" : "#DCC5FF")
-                      : (dm ? "#2B3142" : "#E5D4FF"),
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    color: dm ? "#F2F4F8" : "#5E5D6A",
-                    transition: "all 0.18s ease",
-                    padding: "0 14px 0 12px",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
-                    fontWeight: 900,
-                    gap: "10px",
-                    boxShadow: showWorkspacePanel
-                      ? "0 10px 26px rgba(142,141,155,0.18)"
-                      : "0 8px 22px rgba(142,141,155,0.12)",
-                  }}
-                >
-                  <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Files size={15} />
-                    Workspace
-                  </span>
-                  <span style={{
-                    minWidth: "22px",
-                    height: "22px",
-                    padding: "0 7px",
-                    borderRadius: "999px",
-                    background: dm ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.72)",
-                    color: dm ? "#FFFFFF" : "#6E63A8",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "10px",
-                    fontWeight: 900,
-                    letterSpacing: "0.04em",
-                  }}>
-                    {authUser ? "ON" : "NEW"}
-                  </span>
-                </button>
-                <button
-                  onClick={() => setShowWorkspacePanel(true)}
-                  title={authUser?.email || "Open workspace"}
-                  style={{
-                    width: "34px",
-                    height: "34px",
-                    borderRadius: "50%",
-                    border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#E4D7FF"}`,
-                    background: authUser
-                      ? (dm ? "linear-gradient(180deg, #45516E 0%, #2E364A 100%)" : "linear-gradient(180deg, #F0E5FF 0%, #E1CFFF 100%)")
-                      : (dm ? "rgba(255,255,255,0.06)" : "#FFFFFF"),
-                    color: authUser ? (dm ? "#FFFFFF" : "#6E63A8") : c.docMuted,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: "inherit",
-                    fontSize: "11px",
-                    fontWeight: 900,
-                    boxShadow: "0 6px 16px rgba(142,141,155,0.12)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {accountPreviewLabel}
-                </button>
-              </div>
-            </>
-          )}
           <button onClick={undo} title="Undo" style={{
             width: "36px", height: "36px", border: `1px solid ${c.headerBorder}`,
             borderRadius: "9px", background: "transparent", cursor: "pointer",
@@ -4645,81 +4571,205 @@ export default function EditorPage() {
           </Link>
 
           <div style={{ display: isPdfLoaded ? "block" : "none", width: "28px", height: "1px", background: c.sidebarBorder, margin: "8px 0 2px" }} />
-          <div style={{ display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "stretch", gap: "6px", width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", margin: "2px 0 4px", width: "100%" }}>
-            <span style={{ fontSize: "9px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center", width: "100%" }}>TOOLS</span>
-          </div>
+          <div style={{ display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "stretch", gap: "6px", width: "100%", minHeight: 0, flex: 1 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", margin: "2px 0 4px", width: "100%" }}>
+                <span style={{ fontSize: "9px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center", width: "100%" }}>TOOLS</span>
+              </div>
 
-          {toolBtn("highlighter", <Highlighter size={sideIconSize} />, "Highlight")}
-          {toolBtn("select",      <Hand size={sideIconSize} />,        "Select")}
-          {toolBtn("pencil",      <Pencil size={sideIconSize} />,      "Draw")}
-          <button
-            type="button"
-            onClick={() => selectTool(activeShape ?? "rect")}
-            title="Shapes"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "6px",
-              padding: "9px 6px",
-              borderRadius: "14px",
-              width: "100%",
-              border: "none",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-              background: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActive : "transparent",
-              color: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActiveTxt : c.toolInactiveTxt,
-              fontWeight: 700,
-              fontSize: "11px",
-              letterSpacing: "0.02em",
-            }}
-          >
-            <div style={{ width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {activeShapeIcon}
+              {toolBtn("highlighter", <Highlighter size={sideIconSize} />, "Highlight")}
+              {toolBtn("select",      <Hand size={sideIconSize} />,        "Select")}
+              {toolBtn("pencil",      <Pencil size={sideIconSize} />,      "Draw")}
+              <button
+                type="button"
+                onClick={() => selectTool(activeShape ?? "rect")}
+                title="Shapes"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "9px 6px",
+                  borderRadius: "14px",
+                  width: "100%",
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  background: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActive : "transparent",
+                  color: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActiveTxt : c.toolInactiveTxt,
+                  fontWeight: 700,
+                  fontSize: "11px",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                <div style={{ width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {activeShapeIcon}
+                </div>
+                <span>Shape</span>
+              </button>
+              {toolBtn("text",        <Type size={sideIconSize} />,        "Text")}
+              {toolBtn("signature",   <PenLine size={sideIconSize} />,     "Sign")}
+              <button
+                type="button"
+                onClick={() => selectTool("eraser")}
+                title="Eraser"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "7px",
+                  padding: "12px 6px 11px",
+                  borderRadius: "16px",
+                  width: "100%",
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  background: activeTool === "eraser" ? c.toolActive : "transparent",
+                  color: activeTool === "eraser" ? c.toolActiveTxt : c.toolInactiveTxt,
+                  fontWeight: 800,
+                  fontSize: "11px",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                <div
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: "10px",
+                    background: activeTool === "eraser" ? "rgba(255,255,255,0.28)" : "transparent",
+                  }}
+                >
+                  <EraserTrailIcon size={22} />
+                </div>
+                <span>Eraser</span>
+              </button>
+              {toolBtn("note-btn",    <MessageSquare size={sideIconSize} />, "Note", addNote)}
             </div>
-            <span>Shape</span>
-          </button>
-          {toolBtn("text",        <Type size={sideIconSize} />,        "Text")}
-          {toolBtn("signature",   <PenLine size={sideIconSize} />,     "Sign")}
-          <button
-            type="button"
-            onClick={() => selectTool("eraser")}
-            title="Eraser"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "7px",
-              padding: "12px 6px 11px",
-              borderRadius: "16px",
-              width: "100%",
-              border: "none",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-              background: activeTool === "eraser" ? c.toolActive : "transparent",
-              color: activeTool === "eraser" ? c.toolActiveTxt : c.toolInactiveTxt,
-              fontWeight: 800,
-              fontSize: "11px",
-              letterSpacing: "0.02em",
-            }}
-          >
-            <div
-              style={{
-                width: "28px",
-                height: "28px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "10px",
-                background: activeTool === "eraser" ? "rgba(255,255,255,0.28)" : "transparent",
-              }}
-            >
-              <EraserTrailIcon size={22} />
-            </div>
-            <span>Eraser</span>
-          </button>
-          {toolBtn("note-btn",    <MessageSquare size={sideIconSize} />, "Note", addNote)}
+
+            {cloudDraftsEnabled && (
+              <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "8px", width: "100%", paddingTop: "10px" }}>
+                <div style={{ width: "100%", height: "1px", background: c.sidebarBorder, opacity: 0.9 }} />
+                <button
+                  type="button"
+                  onClick={() => setShowWorkspacePanel(true)}
+                  title="Workspace"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    borderRadius: "16px",
+                    background: showWorkspacePanel ? c.toolActive : (dm ? "#232938" : "#F4ECFF"),
+                    color: showWorkspacePanel ? c.toolActiveTxt : c.docText,
+                    padding: "11px 6px 10px",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "11px",
+                    fontWeight: 800,
+                    boxShadow: showWorkspacePanel ? "0 10px 24px rgba(142,141,155,0.2)" : "0 8px 18px rgba(142,141,155,0.1)",
+                  }}
+                >
+                  <div style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "10px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: showWorkspacePanel ? "rgba(255,255,255,0.22)" : (dm ? "rgba(255,255,255,0.08)" : "#FFFFFF"),
+                  }}>
+                    <Files size={18} />
+                  </div>
+                  <span>Cloud</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openCloudDialog(authUser ? "load" : "sign-in")}
+                  title={authUser ? "Load cloud" : "Sign in"}
+                  style={{
+                    width: "100%",
+                    border: `1px solid ${c.sidebarBorder}`,
+                    borderRadius: "14px",
+                    background: c.panelBg,
+                    color: c.docText,
+                    padding: "9px 6px",
+                    cursor: "pointer",
+                    fontSize: "11px",
+                    fontWeight: 800,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {authUser ? "Load cloud" : "Sign in"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openCloudDialog("save")}
+                  title="Save cloud"
+                  style={{
+                    width: "100%",
+                    border: `1px solid ${c.sidebarBorder}`,
+                    borderRadius: "14px",
+                    background: c.panelBg,
+                    color: c.docText,
+                    padding: "9px 6px",
+                    cursor: "pointer",
+                    fontSize: "11px",
+                    fontWeight: 800,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Save cloud
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowWorkspacePanel(true)}
+                  title={authUser?.email || "Open account"}
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: "pointer",
+                    display: "flex",
+                    justifyContent: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: "42px",
+                      height: "42px",
+                      borderRadius: "50%",
+                      overflow: "hidden",
+                      border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#DFCFFF"}`,
+                      background: authUser
+                        ? (dm ? "linear-gradient(180deg, #45516E 0%, #2E364A 100%)" : "linear-gradient(180deg, #F0E5FF 0%, #E1CFFF 100%)")
+                        : (dm ? "#232938" : "#FFFFFF"),
+                      color: authUser ? (dm ? "#FFFFFF" : "#6E63A8") : c.docMuted,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "13px",
+                      fontWeight: 900,
+                      boxShadow: "0 8px 18px rgba(142,141,155,0.16)",
+                    }}
+                  >
+                    {accountAvatarUrl ? (
+                      <img
+                        src={accountAvatarUrl}
+                        alt={authUser?.email || "Account avatar"}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    ) : (
+                      accountPreviewLabel
+                    )}
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </aside>

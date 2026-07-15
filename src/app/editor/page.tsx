@@ -5,10 +5,9 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import rough from "roughjs/bin/rough";
 import type { Options as RoughOptions } from "roughjs/bin/core";
-import type { CloudCanvasStroke, CloudDocumentRecord, CloudEditorState, CloudPageSnapshot, CloudSourceFile } from "@/lib/cloud-document";
+import type { LocalCanvasStroke, LocalEditorState, LocalPageSnapshot } from "@/lib/local-document";
 import {
   fetchSupabaseUser,
-  getSupabasePublicEnv,
   getStoredSupabaseSession,
   signOutSupabaseSession,
   startGoogleSignIn,
@@ -826,16 +825,6 @@ const dataUrlToImageData = async (src: string, width: number, height: number) =>
   return ctx.getImageData(0, 0, width, height);
 };
 
-const uniqueSourceFiles = (files: CloudSourceFile[]) => {
-  const seen = new Set<string>();
-  return files.filter(file => {
-    const key = `${file.storagePath}|${file.name}|${file.size}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
 const cloneImageData = (imageData: ImageData) =>
   new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
 
@@ -936,7 +925,7 @@ function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
 }
 
 export default function EditorPage() {
-  const cloudDraftsEnabled = true;
+  const accountSignInEnabled = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const [activeTool, setActiveTool] = useState("select");
   const [activeColor, setActiveColor] = useState(DEFAULT_HIGHLIGHT_COLOR);
   const [brushWidth, setBrushWidth] = useState(22);
@@ -974,24 +963,10 @@ export default function EditorPage() {
   const [toolTipText, setToolTipText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
-  const [cloudDocumentId, setCloudDocumentId] = useState<string | null>(null);
-  const [cloudReady, setCloudReady] = useState(false);
   const [authSession, setAuthSession] = useState<SupabaseSession | null>(null);
   const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [isAuthWorking, setIsAuthWorking] = useState(false);
-  const [sourceFiles, setSourceFiles] = useState<CloudSourceFile[]>([]);
-  const [cloudDocuments, setCloudDocuments] = useState<Array<{
-    id: string;
-    title: string;
-    updated_at: string;
-    created_at: string;
-  }>>([]);
-  const [showDocumentsMenu, setShowDocumentsMenu] = useState(false);
-  const [isDocumentsLoading, setIsDocumentsLoading] = useState(false);
   const [showWorkspacePanel, setShowWorkspacePanel] = useState(false);
-  const [cloudDialogMode, setCloudDialogMode] = useState<"sign-in" | "load" | "save" | null>(null);
-  const [cloudDialogMessage, setCloudDialogMessage] = useState("");
-  const [cloudDialogTone, setCloudDialogTone] = useState<"neutral" | "success" | "error">("neutral");
 
   const annotCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1044,11 +1019,7 @@ export default function EditorPage() {
   const zoomLevelRef = useRef(0.5);
   const includePageNumbersRef = useRef(false);
   const signatureTextRef = useRef("");
-  const cloudDocumentIdRef = useRef<string | null>(null);
-  const cloudBrowserKeyRef = useRef("");
-  const cloudAutosaveTimerRef = useRef<number | null>(null);
   const authSessionRef = useRef<SupabaseSession | null>(null);
-  const sourceFilesRef = useRef<CloudSourceFile[]>([]);
   const baseImageDataRef = useRef<ImageData | null>(null);
   const strokesRef = useRef<CanvasStroke[]>([]);
   const currentStrokeRef = useRef<PencilStroke | null>(null);
@@ -1067,15 +1038,6 @@ export default function EditorPage() {
     changeZoom: () => {},
     changeViewMode: () => {},
   });
-
-  const createCloudAuthHeaders = useCallback((contentType?: string): HeadersInit => {
-    const { anonKey } = getSupabasePublicEnv();
-    return {
-      ...(contentType ? { "Content-Type": contentType } : {}),
-      ...(anonKey ? { "x-supabase-anon-key": anonKey } : {}),
-      ...(authSessionRef.current?.access_token ? { Authorization: `Bearer ${authSessionRef.current.access_token}` } : {}),
-    };
-  }, []);
 
   // Keep refs in sync with state (for event handlers)
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
@@ -1101,9 +1063,7 @@ export default function EditorPage() {
   useEffect(() => { zoomLevelRef.current = zoomLevel; }, [zoomLevel]);
   useEffect(() => { includePageNumbersRef.current = includePageNumbers; }, [includePageNumbers]);
   useEffect(() => { signatureTextRef.current = signatureText; }, [signatureText]);
-  useEffect(() => { cloudDocumentIdRef.current = cloudDocumentId; }, [cloudDocumentId]);
   useEffect(() => { authSessionRef.current = authSession; }, [authSession]);
-  useEffect(() => { sourceFilesRef.current = sourceFiles; }, [sourceFiles]);
 
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -1112,21 +1072,7 @@ export default function EditorPage() {
   }, []);
 
   useEffect(() => {
-    if (!cloudDraftsEnabled) return;
-    const storedKey = window.localStorage.getItem("colora-cloud-browser-key");
-    const browserKey = storedKey || crypto.randomUUID();
-    if (!storedKey) window.localStorage.setItem("colora-cloud-browser-key", browserKey);
-    cloudBrowserKeyRef.current = browserKey;
-    const storedDocumentId = window.localStorage.getItem("colora-cloud-document-id");
-    if (storedDocumentId) {
-      cloudDocumentIdRef.current = storedDocumentId;
-      setCloudDocumentId(storedDocumentId);
-    }
-    setCloudReady(true);
-  }, [cloudDraftsEnabled]);
-
-  useEffect(() => {
-    if (!cloudDraftsEnabled) return;
+    if (!accountSignInEnabled) return;
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const accessToken = hash.get("access_token");
     const refreshToken = hash.get("refresh_token") ?? undefined;
@@ -1145,12 +1091,11 @@ export default function EditorPage() {
       const stored = getStoredSupabaseSession();
       if (stored) setAuthSession(stored);
     }
-  }, [cloudDraftsEnabled]);
+  }, [accountSignInEnabled]);
 
   useEffect(() => {
     if (!authSession?.access_token) {
       setAuthUser(null);
-      setCloudDocuments([]);
       return;
     }
     let cancelled = false;
@@ -1320,9 +1265,9 @@ export default function EditorPage() {
     };
   }, []);
 
-  const serializeCloudState = useCallback(async (): Promise<CloudEditorState> => {
+  const serializeLocalState = useCallback(async (): Promise<LocalEditorState> => {
     savePageState(pageNumRef.current);
-    const pages: CloudPageSnapshot[] = [];
+    const pages: LocalPageSnapshot[] = [];
 
     for (let index = 0; index < pagesRef.current.length; index += 1) {
       const source = pagesRef.current[index];
@@ -1359,12 +1304,11 @@ export default function EditorPage() {
       darkMode: darkModeRef.current,
       viewMode: viewModeRef.current,
       zoomLevel: zoomLevelRef.current,
-      sourceFiles: sourceFilesRef.current,
       pages,
     };
   }, [docSubtitle, docTitle, renderPageBackgroundDataUrl, savePageState]);
 
-  const hydrateCloudState = useCallback(async (payload: CloudEditorState) => {
+  const hydrateLocalState = useCallback(async (payload: LocalEditorState) => {
     const hydratedPages = await Promise.all(payload.pages.map(async page => ({
       doc: createImagePdfDocument(await loadImageFromDataUrl(page.backgroundDataUrl)),
       pageNumber: 1,
@@ -1405,7 +1349,6 @@ export default function EditorPage() {
     setDarkMode(payload.darkMode);
     setViewMode(payload.viewMode);
     setZoomLevel(payload.zoomLevel);
-    setSourceFiles(payload.sourceFiles ?? []);
     setTotalPages(payload.totalPages || hydratedPages.length || 1);
     setIsPdfLoaded(hydratedPages.length > 0);
     setSelectedObject(null);
@@ -1414,212 +1357,9 @@ export default function EditorPage() {
     const nextPage = Math.max(1, Math.min(payload.pageNum || 1, hydratedPages.length || 1));
     requestAnimationFrame(() => {
       renderPageRef.current(nextPage);
-      setLastSavedLabel("Loaded from cloud");
+      setLastSavedLabel("Loaded local draft");
     });
   }, []);
-
-  const saveCloudDocument = useCallback(async (mode: "manual" | "auto" = "manual"): Promise<boolean> => {
-    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current || !isPdfLoadedRef.current) return false;
-    try {
-      if (mode === "manual") {
-        setIsSaving(true);
-        setLastSavedLabel("Saving to cloud...");
-      }
-
-      const payload = await serializeCloudState();
-      const response = await fetch("/api/cloud-document", {
-        method: "POST",
-        headers: createCloudAuthHeaders("application/json"),
-        body: JSON.stringify({
-          documentId: cloudDocumentIdRef.current,
-          browserKey: cloudBrowserKeyRef.current,
-          title: docTitle,
-          payload,
-        }),
-      });
-      const data = await response.json() as { document?: CloudDocumentRecord; error?: string };
-
-      if (!response.ok || !data.document) {
-        throw new Error(data.error || "Could not save cloud draft");
-      }
-
-      cloudDocumentIdRef.current = data.document.id;
-      setCloudDocumentId(data.document.id);
-      window.localStorage.setItem("colora-cloud-document-id", data.document.id);
-      setLastSavedLabel(`Cloud saved ${new Date(data.document.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
-      if (mode === "manual") toast("Cloud draft saved");
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not save cloud draft";
-      if (mode === "manual") toast(message);
-      setLastSavedLabel("Cloud save failed");
-      return false;
-    } finally {
-      if (mode === "manual") setIsSaving(false);
-    }
-  }, [cloudDraftsEnabled, docTitle, serializeCloudState, toast]);
-
-  const uploadSourceFilesToCloud = useCallback(async (files: FileList | File[]) => {
-    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) return;
-    const uploaded: CloudSourceFile[] = [];
-    for (const file of Array.from(files)) {
-      const existing = sourceFilesRef.current.find(item =>
-        item.name === file.name && item.size === file.size && item.mimeType === (file.type || "application/octet-stream")
-      );
-      if (existing) {
-        uploaded.push(existing);
-        continue;
-      }
-
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("browserKey", cloudBrowserKeyRef.current);
-      if (cloudDocumentIdRef.current) formData.append("documentId", cloudDocumentIdRef.current);
-
-      const response = await fetch("/api/cloud-storage", {
-        method: "POST",
-        headers: createCloudAuthHeaders(),
-        body: formData,
-      });
-      const data = await response.json() as { file?: CloudSourceFile; error?: string };
-      if (!response.ok || !data.file) {
-        throw new Error(data.error || "Could not upload file");
-      }
-      uploaded.push(data.file);
-    }
-
-    if (uploaded.length) {
-      const next = uniqueSourceFiles([...sourceFilesRef.current, ...uploaded]);
-      setSourceFiles(next);
-      sourceFilesRef.current = next;
-    }
-  }, [cloudDraftsEnabled]);
-
-  const loadCloudDocument = useCallback(async (silent = false): Promise<boolean> => {
-    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) {
-      if (!silent) toast("Cloud drafts unavailable");
-      return false;
-    }
-    if (!authSessionRef.current?.access_token && !cloudDocumentIdRef.current) {
-      if (!silent) toast("Sign in to load cloud drafts");
-      setLastSavedLabel("Local autosave only");
-      return false;
-    }
-    try {
-      setIsSaving(true);
-      setLastSavedLabel("Loading cloud draft...");
-      const params = new URLSearchParams({ browserKey: cloudBrowserKeyRef.current });
-      if (cloudDocumentIdRef.current) params.set("documentId", cloudDocumentIdRef.current);
-      const response = await fetch(`/api/cloud-document?${params.toString()}`, {
-        cache: "no-store",
-        headers: createCloudAuthHeaders(),
-      });
-      const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
-      if (!response.ok || !data.document) {
-        if (!authSessionRef.current?.access_token || !cloudDocumentIdRef.current) {
-          setLastSavedLabel("Local autosave only");
-          return false;
-        }
-        throw new Error(data.error || "Cloud draft not found");
-      }
-      cloudDocumentIdRef.current = data.document.id;
-      setCloudDocumentId(data.document.id);
-      window.localStorage.setItem("colora-cloud-document-id", data.document.id);
-      await hydrateCloudState(data.document.payload);
-      if (!silent) toast("Cloud draft loaded");
-      return true;
-    } catch {
-      if (!silent) toast("No cloud draft found yet");
-      setLastSavedLabel("Cloud load failed");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
-  }, [cloudDraftsEnabled, hydrateCloudState, toast]);
-
-  const loadCloudDocumentById = useCallback(async (documentId: string): Promise<boolean> => {
-    if (!cloudDraftsEnabled || !cloudBrowserKeyRef.current) {
-      toast("Cloud drafts unavailable");
-      return false;
-    }
-    try {
-      setIsSaving(true);
-      setLastSavedLabel("Opening document...");
-      const params = new URLSearchParams({
-        browserKey: cloudBrowserKeyRef.current,
-        documentId,
-      });
-      const response = await fetch(`/api/cloud-document?${params.toString()}`, {
-        cache: "no-store",
-        headers: createCloudAuthHeaders(),
-      });
-      const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
-      if (!response.ok || !data.document) {
-        throw new Error(data.error || "Document not found");
-      }
-      cloudDocumentIdRef.current = data.document.id;
-      setCloudDocumentId(data.document.id);
-      window.localStorage.setItem("colora-cloud-document-id", data.document.id);
-      await hydrateCloudState(data.document.payload);
-      setShowDocumentsMenu(false);
-      toast("Document opened");
-      return true;
-    } catch {
-      toast("Could not open document");
-      setLastSavedLabel("Open failed");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
-  }, [cloudDraftsEnabled, hydrateCloudState, toast]);
-
-  const loadDocumentsList = useCallback(async () => {
-    if (!cloudDraftsEnabled || !authSessionRef.current?.access_token || !cloudBrowserKeyRef.current) {
-      setCloudDocuments([]);
-      return;
-    }
-    try {
-      setIsDocumentsLoading(true);
-      const params = new URLSearchParams({
-        browserKey: cloudBrowserKeyRef.current,
-        mode: "list",
-      });
-      const response = await fetch(`/api/cloud-document?${params.toString()}`, {
-        cache: "no-store",
-        headers: createCloudAuthHeaders(),
-      });
-      const data = await response.json() as {
-        documents?: Array<{ id: string; title: string; updated_at: string; created_at: string }>;
-      };
-      if (!response.ok) throw new Error("Could not load documents");
-      setCloudDocuments(data.documents ?? []);
-    } catch {
-      setCloudDocuments([]);
-    } finally {
-      setIsDocumentsLoading(false);
-    }
-  }, [cloudDraftsEnabled]);
-
-  const openCloudDialog = useCallback((mode: "sign-in" | "load" | "save") => {
-    setCloudDialogMode(mode);
-    setCloudDialogTone("neutral");
-    setCloudDialogMessage(
-      mode === "sign-in"
-        ? "Continue with Google to connect your cloud workspace."
-        : mode === "load"
-          ? "Choose how you want to open your cloud draft."
-          : "Save the current draft to your cloud workspace."
-    );
-  }, []);
-
-  useEffect(() => {
-    if (!authUser?.id) {
-      setShowDocumentsMenu(false);
-      setCloudDocuments([]);
-      return;
-    }
-    void loadDocumentsList();
-  }, [authUser?.id, loadDocumentsList]);
 
   const signInWithGoogle = useCallback(async (): Promise<{ ok: boolean; message: string }> => {
     try {
@@ -1636,7 +1376,7 @@ export default function EditorPage() {
     }
   }, [toast]);
 
-  const signOutCloud = useCallback(async () => {
+  const signOutAccount = useCallback(async () => {
     try {
       setIsAuthWorking(true);
       if (authSessionRef.current?.access_token) {
@@ -2692,7 +2432,6 @@ export default function EditorPage() {
     if (!files?.length || !isPdfLoaded) return;
     try {
       savePageState(pageNum);
-      await uploadSourceFilesToCloud(files);
       const insertedPages = await readDocumentFiles(files);
       if (!insertedPages.length) return;
       shiftStoredPages(pageNum + 1, insertedPages.length);
@@ -2712,7 +2451,6 @@ export default function EditorPage() {
     if (!files?.length || !isPdfLoaded) return;
     try {
       savePageState(pageNum);
-      await uploadSourceFilesToCloud(files);
       const mergedPages = await readDocumentFiles(files);
       if (!mergedPages.length) return;
       pagesRef.current.push(...mergedPages);
@@ -2731,9 +2469,6 @@ export default function EditorPage() {
     if (!files?.length) return;
     toast("Loading file...");
     try {
-      sourceFilesRef.current = [];
-      setSourceFiles([]);
-      await uploadSourceFilesToCloud(files);
       const loadedPages = await readDocumentFiles(files);
       if (!loadedPages.length) return;
       pagesRef.current = loadedPages;
@@ -2770,7 +2505,6 @@ export default function EditorPage() {
     setNotes([]);
     setTextAnnotations([]);
     setPictures([]);
-    setSourceFiles([]);
     setEditingTextId(null);
     setDocTitle("Untitled document");
     setDocSubtitle("");
@@ -3367,7 +3101,7 @@ export default function EditorPage() {
     saveTimerRef.current = window.setTimeout(() => {
       setIsSaving(true);
       setLastSavedLabel("Saving locally...");
-      void serializeCloudState().then(payload => {
+      void serializeLocalState().then(payload => {
         window.localStorage.setItem("colora-editor-state", JSON.stringify({
           version: 2,
           savedAt: Date.now(),
@@ -3397,12 +3131,8 @@ export default function EditorPage() {
     totalPages,
     selectedObject,
     isPdfLoaded,
-    serializeCloudState,
+    serializeLocalState,
   ]);
-
-  useEffect(() => () => {
-    if (cloudAutosaveTimerRef.current) window.clearTimeout(cloudAutosaveTimerRef.current);
-  }, []);
 
   useEffect(() => {
     const raw = window.localStorage.getItem("colora-editor-state");
@@ -3411,7 +3141,7 @@ export default function EditorPage() {
       const saved = JSON.parse(raw);
       window.setTimeout(() => {
         if (saved.payload?.pages) {
-          void hydrateCloudState(saved.payload).then(() => {
+          void hydrateLocalState(saved.payload).then(() => {
             const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
             setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
           }).catch(() => {
@@ -3433,7 +3163,7 @@ export default function EditorPage() {
     } catch {
       // Ignore malformed local state.
     }
-  }, [hydrateCloudState]);
+  }, [hydrateLocalState]);
 
   const loadLocalDraft = useCallback(async (): Promise<boolean> => {
     const raw = window.localStorage.getItem("colora-editor-state");
@@ -3443,9 +3173,9 @@ export default function EditorPage() {
     }
 
     try {
-      const saved = JSON.parse(raw) as { savedAt?: number; payload?: CloudEditorState };
+      const saved = JSON.parse(raw) as { savedAt?: number; payload?: LocalEditorState };
       if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
-      await hydrateCloudState(saved.payload);
+      await hydrateLocalState(saved.payload);
       const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
       setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       toast("Last local draft opened");
@@ -3454,7 +3184,7 @@ export default function EditorPage() {
       toast("Could not open local draft");
       return false;
     }
-  }, [hydrateCloudState, toast]);
+  }, [hydrateLocalState, toast]);
 
   const saveLocalDraftNow = useCallback(async (): Promise<boolean> => {
     if (!isPdfLoadedRef.current) {
@@ -3464,7 +3194,7 @@ export default function EditorPage() {
 
     try {
       setIsSaving(true);
-      const payload = await serializeCloudState();
+      const payload = await serializeLocalState();
       window.localStorage.setItem("colora-editor-state", JSON.stringify({
         version: 2,
         savedAt: Date.now(),
@@ -3480,7 +3210,7 @@ export default function EditorPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [serializeCloudState, toast]);
+  }, [serializeLocalState, toast]);
 
   const clearLocalDraft = useCallback(() => {
     window.localStorage.removeItem("colora-editor-state");
@@ -4006,13 +3736,7 @@ export default function EditorPage() {
               {lastSavedLabel}
             </span>
             <span style={{ fontSize: "10px", color: c.docMuted, opacity: 0.82 }}>
-              {cloudDraftsEnabled
-                ? authUser?.email
-                  ? `Signed in as ${authUser.email}`
-                  : cloudDocumentId
-                    ? "Local draft ready"
-                    : "Local recovery ready"
-                : "Local autosave only"}
+              {authUser?.email ? `Signed in as ${authUser.email}` : "Local recovery ready"}
             </span>
           </div>
           <button onClick={undo} title="Undo" style={{
@@ -4122,12 +3846,15 @@ export default function EditorPage() {
 
             <div style={{
               border: `1px solid ${c.headerBorder}`,
-              borderRadius: "18px",
-              padding: "14px",
-              background: dm ? "rgba(28,34,48,0.86)" : "#FBFAFF",
+              borderRadius: "22px",
+              padding: "16px",
+              background: dm
+                ? "linear-gradient(145deg, rgba(38,45,62,0.92), rgba(26,31,44,0.9))"
+                : "linear-gradient(145deg, #FFFDFB 0%, #F6EFFF 58%, #FFF8E8 100%)",
+              boxShadow: dm ? "0 18px 46px rgba(0,0,0,0.24)" : "0 18px 46px rgba(142,141,155,0.14)",
               display: "flex",
               flexDirection: "column",
-              gap: "12px",
+              gap: "14px",
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <div
@@ -4147,8 +3874,8 @@ export default function EditorPage() {
                     justifyContent: "center",
                     fontSize: "13px",
                     fontWeight: 900,
-                  }}
-                >
+                    }}
+                  >
                   {accountAvatarUrl ? (
                     <img
                       src={accountAvatarUrl}
@@ -4156,56 +3883,35 @@ export default function EditorPage() {
                       style={{ width: "100%", height: "100%", objectFit: "cover" }}
                     />
                   ) : (
-                    accountPreviewLabel
+                    "L"
                   )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, flex: 1 }}>
                   <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    This browser
+                    Local recovery
                   </span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Your last document is saved on this browser.
+                    Your latest document stays safe on this browser.
                   </span>
                 </div>
-                {authUser ? (
-                  <button
-                    onClick={() => void loadLocalDraft()}
-                    style={{
-                      height: "34px",
-                      padding: "0 12px",
-                      borderRadius: "10px",
-                      border: `1px solid ${c.headerBorder}`,
-                      background: "transparent",
-                      color: c.docText,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "11px",
-                      fontWeight: 800,
-                      flexShrink: 0,
-                    }}
-                  >
-                    Open last
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => void loadLocalDraft()}
-                    style={{
-                      height: "34px",
-                      padding: "0 12px",
-                      borderRadius: "10px",
-                      border: "none",
-                      background: dm ? "#2B3142" : "#EDE1FF",
-                      color: dm ? "#F2F4F8" : "#5E5D6A",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "11px",
-                      fontWeight: 800,
-                      flexShrink: 0,
-                    }}
-                  >
-                    Open last
-                  </button>
-                )}
+                <button
+                  onClick={() => void loadLocalDraft()}
+                  style={{
+                    height: "34px",
+                    padding: "0 12px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: dm ? "#2B3142" : "#EDE1FF",
+                    color: dm ? "#F2F4F8" : "#5E5D6A",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "11px",
+                    fontWeight: 800,
+                    flexShrink: 0,
+                  }}
+                >
+                  Open last
+                </button>
               </div>
 
               <div style={{
@@ -4309,294 +4015,45 @@ export default function EditorPage() {
                 </div>
               </div>
             </div>
-          </aside>
-        </>
-      )}
 
-      {cloudDialogMode && (
-        <>
-          <div
-            onClick={() => setCloudDialogMode(null)}
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(18, 22, 32, 0.2)",
-              backdropFilter: "blur(4px)",
-              zIndex: 125,
-            }}
-          />
-          <div
-            style={{
-              position: "fixed",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              width: "min(460px, calc(100vw - 28px))",
-              background: c.panelBg,
+            <div style={{
               border: `1px solid ${c.headerBorder}`,
-              borderRadius: "24px",
-              boxShadow: "0 34px 90px rgba(28,30,38,0.18)",
-              padding: "18px",
+              borderRadius: "18px",
+              padding: "14px",
+              background: dm ? "rgba(28,34,48,0.7)" : "#FFFFFF",
               display: "flex",
-              flexDirection: "column",
-              gap: "14px",
-              zIndex: 130,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase" }}>
-                  Cloud action
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+            }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
+                <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>
+                  {authUser ? authUser.email || "Signed in" : "Optional account"}
                 </span>
-                <span style={{ fontSize: "18px", fontWeight: 800, color: c.docText }}>
-                  {cloudDialogMode === "sign-in" ? "Sign in to Colora" : cloudDialogMode === "load" ? "Load cloud draft" : "Save cloud draft"}
+                <span style={{ fontSize: "11px", color: c.docMuted }}>
+                  {authUser ? "Account is connected. Local recovery still works offline." : "Sign in is kept for profile access, not required for recovery."}
                 </span>
               </div>
               <button
-                onClick={() => setCloudDialogMode(null)}
+                onClick={() => authUser ? void signOutAccount() : void signInWithGoogle()}
                 style={{
-                  width: "34px",
                   height: "34px",
-                  borderRadius: "12px",
-                  border: "none",
-                  background: c.toolActive,
-                  color: c.toolActiveTxt,
+                  padding: "0 12px",
+                  borderRadius: "10px",
+                  border: authUser ? `1px solid ${c.headerBorder}` : "none",
+                  background: authUser ? "transparent" : (dm ? "#2B3142" : "#EDE1FF"),
+                  color: dm ? "#F2F4F8" : "#5E5D6A",
                   cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  fontFamily: "inherit",
+                  fontSize: "11px",
+                  fontWeight: 800,
+                  flexShrink: 0,
                 }}
               >
-                <X size={16} />
+                {isAuthWorking ? "..." : authUser ? "Sign out" : "Sign in"}
               </button>
             </div>
-
-            <div style={{
-              borderRadius: "16px",
-              padding: "12px 14px",
-              background:
-                cloudDialogTone === "error"
-                  ? (dm ? "rgba(126, 50, 63, 0.22)" : "#FFE9EE")
-                  : cloudDialogTone === "success"
-                    ? (dm ? "rgba(46, 102, 77, 0.24)" : "#EAFBF1")
-                    : (dm ? "rgba(255,255,255,0.06)" : "#F6F3FF"),
-              color:
-                cloudDialogTone === "error"
-                  ? (dm ? "#FFD6DE" : "#8A2442")
-                  : cloudDialogTone === "success"
-                    ? (dm ? "#DDF8E8" : "#2F5D45")
-                    : c.docMuted,
-              fontSize: "12px",
-              fontWeight: 700,
-              lineHeight: 1.6,
-            }}>
-              {cloudDialogMessage}
-            </div>
-
-            {cloudDialogMode === "sign-in" && (
-              <>
-                <div style={{
-                  borderRadius: "16px",
-                  border: `1px solid ${c.headerBorder}`,
-                  background: dm ? "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)" : "linear-gradient(180deg, #FCFAFF 0%, #F4EEFF 100%)",
-                  padding: "16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                }}>
-                  <span style={{ fontSize: "14px", fontWeight: 800, color: c.docText }}>
-                    Use your Google account
-                  </span>
-                  <span style={{ fontSize: "12px", lineHeight: 1.6, color: c.docMuted }}>
-                    One sign-in unlocks your cloud workspace and keeps everything in one place.
-                  </span>
-                  <div style={{ display: "grid", gap: "8px" }}>
-                    {[
-                      "Sync drafts across devices",
-                      "Restore uploaded files later",
-                      "Open saved cloud documents quickly",
-                    ].map(item => (
-                      <div key={item} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: c.docText, fontWeight: 700 }}>
-                        <span style={{
-                          width: "8px",
-                          height: "8px",
-                          borderRadius: "50%",
-                          background: dm ? "#CDB7FF" : "#C9A6FF",
-                          flexShrink: 0,
-                        }} />
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                  <button
-                    onClick={() => setCloudDialogMode(null)}
-                    style={{
-                      height: "40px",
-                      padding: "0 14px",
-                      borderRadius: "12px",
-                      border: `1px solid ${c.headerBorder}`,
-                      background: "transparent",
-                      color: c.docText,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
-                      fontWeight: 800,
-                    }}
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const result = await signInWithGoogle();
-                      setCloudDialogTone(result.ok ? "success" : "error");
-                      setCloudDialogMessage(result.message);
-                    }}
-                    style={{
-                      height: "40px",
-                      padding: "0 14px",
-                      borderRadius: "12px",
-                      border: "none",
-                      background: dm ? "#2B3142" : "#EDE1FF",
-                      color: dm ? "#F2F4F8" : "#5E5D6A",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
-                      fontWeight: 800,
-                    }}
-                  >
-                    {isAuthWorking ? "Opening..." : "Continue with Google"}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {cloudDialogMode === "load" && (
-              <>
-                {authUser && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "240px", overflowY: "auto" }}>
-                    {cloudDocuments.length ? cloudDocuments.map(document => (
-                      <button
-                        key={document.id}
-                        onClick={async () => {
-                          const ok = await loadCloudDocumentById(document.id).then(() => true).catch(() => false);
-                          setCloudDialogTone(ok ? "success" : "error");
-                          setCloudDialogMessage(ok ? `Opened ${document.title || "Untitled document"}.` : "Could not open the selected cloud document.");
-                          if (ok) setCloudDialogMode(null);
-                        }}
-                        style={{
-                          width: "100%",
-                          border: `1px solid ${c.headerBorder}`,
-                          background: document.id === cloudDocumentId ? c.toolActive : "transparent",
-                          color: document.id === cloudDocumentId ? c.toolActiveTxt : c.docText,
-                          borderRadius: "14px",
-                          padding: "12px",
-                          textAlign: "left",
-                          cursor: "pointer",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "4px",
-                        }}
-                      >
-                        <span style={{ fontSize: "12px", fontWeight: 800 }}>{document.title || "Untitled document"}</span>
-                        <span style={{ fontSize: "10px", opacity: 0.82 }}>
-                          Updated {new Date(document.updated_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      </button>
-                    )) : (
-                      <div style={{ fontSize: "12px", color: c.docMuted }}>No cloud documents found for this account.</div>
-                    )}
-                  </div>
-                )}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                  <button
-                    onClick={() => setCloudDialogMode(null)}
-                    style={{
-                      height: "40px",
-                      padding: "0 14px",
-                      borderRadius: "12px",
-                      border: `1px solid ${c.headerBorder}`,
-                      background: "transparent",
-                      color: c.docText,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
-                      fontWeight: 800,
-                    }}
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const ok = await loadCloudDocument();
-                      setCloudDialogTone(ok ? "success" : "error");
-                      setCloudDialogMessage(ok ? "Loaded the latest cloud draft." : "Could not load cloud draft.");
-                      if (ok) setCloudDialogMode(null);
-                    }}
-                    style={{
-                      height: "40px",
-                      padding: "0 14px",
-                      borderRadius: "12px",
-                      border: "none",
-                      background: dm ? "#2B3142" : "#EDE1FF",
-                      color: dm ? "#F2F4F8" : "#5E5D6A",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
-                      fontWeight: 800,
-                    }}
-                  >
-                    Load latest
-                  </button>
-                </div>
-              </>
-            )}
-
-            {cloudDialogMode === "save" && (
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button
-                  onClick={() => setCloudDialogMode(null)}
-                  style={{
-                    height: "40px",
-                    padding: "0 14px",
-                    borderRadius: "12px",
-                    border: `1px solid ${c.headerBorder}`,
-                    background: "transparent",
-                    color: c.docText,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
-                    fontWeight: 800,
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    const ok = await saveCloudDocument("manual");
-                    setCloudDialogTone(ok ? "success" : "error");
-                    setCloudDialogMessage(ok ? "Cloud draft saved successfully." : "Could not save cloud draft.");
-                    if (ok) setCloudDialogMode(null);
-                  }}
-                  style={{
-                    height: "40px",
-                    padding: "0 14px",
-                    borderRadius: "12px",
-                    border: "none",
-                    background: dm ? "#2B3142" : "#EDE1FF",
-                    color: dm ? "#F2F4F8" : "#5E5D6A",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: "12px",
-                    fontWeight: 800,
-                  }}
-                >
-                  {isSaving ? "Saving..." : "Save now"}
-                </button>
-              </div>
-            )}
-          </div>
+          </aside>
         </>
       )}
 
@@ -4701,8 +4158,7 @@ export default function EditorPage() {
               {toolBtn("note-btn",    <MessageSquare size={sideIconSize} />, "Note", addNote)}
             </div>
 
-            {cloudDraftsEnabled && (
-              <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px", width: "100%", paddingTop: "6px", flexShrink: 0 }}>
+            <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px", width: "100%", paddingTop: "6px", flexShrink: 0 }}>
                 <div style={{ width: "100%", height: "1px", background: c.sidebarBorder, opacity: 0.9 }} />
                 <button
                   type="button"
@@ -4757,7 +4213,6 @@ export default function EditorPage() {
                   <span>{authUser ? "Account" : "Sign in"}</span>
                 </button>
               </div>
-            )}
           </div>
         </div>
       </aside>

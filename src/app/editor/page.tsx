@@ -1494,6 +1494,11 @@ export default function EditorPage() {
       if (!silent) toast("Cloud drafts unavailable");
       return false;
     }
+    if (!authSessionRef.current?.access_token && !cloudDocumentIdRef.current) {
+      if (!silent) toast("Sign in to load cloud drafts");
+      setLastSavedLabel("Local autosave only");
+      return false;
+    }
     try {
       setIsSaving(true);
       setLastSavedLabel("Loading cloud draft...");
@@ -1507,6 +1512,10 @@ export default function EditorPage() {
       });
       const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
       if (!response.ok || !data.document) {
+        if (!authSessionRef.current?.access_token || !cloudDocumentIdRef.current) {
+          setLastSavedLabel("Local autosave only");
+          return false;
+        }
         throw new Error(data.error || "Cloud draft not found");
       }
       cloudDocumentIdRef.current = data.document.id;
@@ -1516,7 +1525,7 @@ export default function EditorPage() {
       if (!silent) toast("Cloud draft loaded");
       return true;
     } catch {
-      if (!silent) toast("Could not load cloud draft");
+      if (!silent) toast("No cloud draft found yet");
       setLastSavedLabel("Cloud load failed");
       return false;
     } finally {
@@ -3494,14 +3503,14 @@ export default function EditorPage() {
         title={label}
         style={{
           display: "flex", flexDirection: "column", alignItems: "center",
-          gap: "6px", padding: "9px 6px", borderRadius: "14px", width: "100%",
+          gap: "4px", padding: "6px 4px", borderRadius: "14px", width: "100%",
           border: "none", cursor: "pointer", transition: "all 0.15s ease",
           background: isActive ? c.toolActive : "transparent",
           color: isActive ? c.toolActiveTxt : c.toolInactiveTxt,
-          fontWeight: 700, fontSize: "11px", letterSpacing: "0.02em",
+          fontWeight: 700, fontSize: "10px", letterSpacing: "0.01em",
         }}
       >
-        <div style={{ width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
+        <div style={{ width: "20px", height: "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
         <span>{label}</span>
       </button>
     );
@@ -3609,11 +3618,12 @@ export default function EditorPage() {
   });
 
   const pictureControlsEnabled = activeTool === "select" || !activeTool || activeTool === "highlighter";
+  const leftRailWidth = isPdfLoaded ? "80px" : "1fr";
 
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: isPdfLoaded ? "80px 1fr" : "1fr",
+      gridTemplateColumns: isPdfLoaded ? `${leftRailWidth} 1fr` : "1fr",
       gridTemplateRows: "64px 1fr",
       height: "100dvh", width: "100%", overflow: "hidden",
       background: c.bg, color: c.docText,
@@ -4399,18 +4409,36 @@ export default function EditorPage() {
                 <div style={{
                   borderRadius: "16px",
                   border: `1px solid ${c.headerBorder}`,
-                  background: dm ? "rgba(255,255,255,0.04)" : "#FAF8FF",
-                  padding: "14px",
+                  background: dm ? "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)" : "linear-gradient(180deg, #FCFAFF 0%, #F4EEFF 100%)",
+                  padding: "16px",
                   display: "flex",
                   flexDirection: "column",
-                  gap: "8px",
+                  gap: "10px",
                 }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>
+                  <span style={{ fontSize: "14px", fontWeight: 800, color: c.docText }}>
                     Use your Google account
                   </span>
                   <span style={{ fontSize: "12px", lineHeight: 1.6, color: c.docMuted }}>
-                    This keeps the header clean and connects your documents, source files, and cloud drafts to one account.
+                    One sign-in unlocks your cloud workspace and keeps everything in one place.
                   </span>
+                  <div style={{ display: "grid", gap: "8px" }}>
+                    {[
+                      "Sync drafts across devices",
+                      "Restore uploaded files later",
+                      "Open saved cloud documents quickly",
+                    ].map(item => (
+                      <div key={item} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: c.docText, fontWeight: 700 }}>
+                        <span style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: dm ? "#CDB7FF" : "#C9A6FF",
+                          flexShrink: 0,
+                        }} />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
                   <button
@@ -4428,7 +4456,7 @@ export default function EditorPage() {
                       fontWeight: 800,
                     }}
                   >
-                    Cancel
+                    Close
                   </button>
                   <button
                     onClick={async () => {
@@ -4587,25 +4615,29 @@ export default function EditorPage() {
         gridColumn: "1", gridRow: "2",
         background: c.sidebarBg, borderRight: `1px solid ${c.sidebarBorder}`,
         display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "center",
-        justifyContent: "space-between", padding: "14px 10px",
+        justifyContent: "space-between", padding: "12px 6px",
+        width: leftRailWidth,
+        minWidth: leftRailWidth,
+        minHeight: 0,
+        overflow: "hidden",
         transition: "background 0.2s",
       }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", width: "100%" }}>
-          <Link href="/" style={{ textDecoration: "none", marginBottom: "14px" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", width: "100%", minHeight: 0, height: "100%" }}>
+          <Link href="/" style={{ textDecoration: "none", marginBottom: "10px" }}>
             <div style={{
-              width: "42px", height: "42px", borderRadius: "14px",
+              width: "38px", height: "38px", borderRadius: "12px",
               background: c.toolActive, display: "flex", alignItems: "center",
               justifyContent: "center", cursor: "pointer",
             }}>
-              <Home size={16} color={c.toolActiveTxt} />
+              <Home size={15} color={c.toolActiveTxt} />
             </div>
           </Link>
 
-          <div style={{ display: isPdfLoaded ? "block" : "none", width: "28px", height: "1px", background: c.sidebarBorder, margin: "8px 0 2px" }} />
-          <div style={{ display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "stretch", gap: "6px", width: "100%", minHeight: 0, flex: 1 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", margin: "2px 0 4px", width: "100%" }}>
-                <span style={{ fontSize: "9px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center", width: "100%" }}>TOOLS</span>
+          <div style={{ display: isPdfLoaded ? "block" : "none", width: "24px", height: "1px", background: c.sidebarBorder, margin: "6px 0 1px" }} />
+          <div style={{ display: isPdfLoaded ? "flex" : "none", flexDirection: "column", alignItems: "stretch", gap: "4px", width: "100%", minHeight: 0, flex: 1 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px", width: "100%", minHeight: 0, overflowY: "auto", overflowX: "hidden", paddingRight: "1px" }} className="hide-scrollbar">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px", margin: "1px 0 2px", width: "100%" }}>
+                <span style={{ fontSize: "8px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", textAlign: "center", width: "100%" }}>TOOLS</span>
               </div>
 
               {toolBtn("highlighter", <Highlighter size={sideIconSize} />, "Highlight")}
@@ -4619,8 +4651,8 @@ export default function EditorPage() {
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  gap: "6px",
-                  padding: "9px 6px",
+                  gap: "4px",
+                  padding: "6px 4px",
                   borderRadius: "14px",
                   width: "100%",
                   border: "none",
@@ -4629,11 +4661,11 @@ export default function EditorPage() {
                   background: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActive : "transparent",
                   color: [ "rect", "ellipse", "diamond", "line", "arrow" ].includes(activeTool) ? c.toolActiveTxt : c.toolInactiveTxt,
                   fontWeight: 700,
-                  fontSize: "11px",
+                  fontSize: "10px",
                   letterSpacing: "0.02em",
                 }}
               >
-                <div style={{ width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ width: "20px", height: "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {activeShapeIcon}
                 </div>
                 <span>Shape</span>
@@ -4648,8 +4680,8 @@ export default function EditorPage() {
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  gap: "7px",
-                  padding: "12px 6px 11px",
+                  gap: "4px",
+                  padding: "7px 4px 6px",
                   borderRadius: "16px",
                   width: "100%",
                   border: "none",
@@ -4658,14 +4690,14 @@ export default function EditorPage() {
                   background: activeTool === "eraser" ? c.toolActive : "transparent",
                   color: activeTool === "eraser" ? c.toolActiveTxt : c.toolInactiveTxt,
                   fontWeight: 800,
-                  fontSize: "11px",
+                  fontSize: "10px",
                   letterSpacing: "0.02em",
                 }}
               >
                 <div
                   style={{
-                    width: "28px",
-                    height: "28px",
+                    width: "22px",
+                    height: "22px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -4673,7 +4705,7 @@ export default function EditorPage() {
                     background: activeTool === "eraser" ? "rgba(255,255,255,0.28)" : "transparent",
                   }}
                 >
-                  <EraserTrailIcon size={22} />
+                  <EraserTrailIcon size={18} />
                 </div>
                 <span>Eraser</span>
               </button>
@@ -4681,7 +4713,7 @@ export default function EditorPage() {
             </div>
 
             {cloudDraftsEnabled && (
-              <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "8px", width: "100%", paddingTop: "18px" }}>
+              <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px", width: "100%", paddingTop: "6px", flexShrink: 0 }}>
                 <div style={{ width: "100%", height: "1px", background: c.sidebarBorder, opacity: 0.9 }} />
                 <button
                   type="button"
@@ -4690,24 +4722,24 @@ export default function EditorPage() {
                   style={{
                     width: "100%",
                     border: "none",
-                    borderRadius: "16px",
+                    borderRadius: "14px",
                     background: showWorkspacePanel ? c.toolActive : (dm ? "#232938" : "#F4ECFF"),
                     color: showWorkspacePanel ? c.toolActiveTxt : c.docText,
-                    padding: "11px 6px 10px",
+                    padding: "8px 4px 7px",
                     cursor: "pointer",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
-                    gap: "6px",
-                    fontSize: "11px",
+                    gap: "4px",
+                    fontSize: "10px",
                     fontWeight: 800,
                     boxShadow: showWorkspacePanel ? "0 10px 24px rgba(142,141,155,0.2)" : "0 8px 18px rgba(142,141,155,0.1)",
                   }}
                 >
                   <span
                     style={{
-                      width: "38px",
-                      height: "38px",
+                      width: "32px",
+                      height: "32px",
                       borderRadius: "50%",
                       overflow: "hidden",
                       border: `1px solid ${dm ? "rgba(255,255,255,0.16)" : "#DFCFFF"}`,
@@ -4718,7 +4750,7 @@ export default function EditorPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: "12px",
+                      fontSize: "11px",
                       fontWeight: 900,
                       boxShadow: "0 8px 18px rgba(142,141,155,0.16)",
                     }}

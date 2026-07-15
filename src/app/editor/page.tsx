@@ -936,7 +936,7 @@ function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
 }
 
 export default function EditorPage() {
-  const cloudDraftsEnabled = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const cloudDraftsEnabled = true;
   const [activeTool, setActiveTool] = useState("select");
   const [activeColor, setActiveColor] = useState(DEFAULT_HIGHLIGHT_COLOR);
   const [brushWidth, setBrushWidth] = useState(22);
@@ -3362,29 +3362,23 @@ export default function EditorPage() {
   }, []);
 
   useEffect(() => {
+    if (!isPdfLoaded) return;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       setIsSaving(true);
-      setLastSavedLabel("Saving...");
-      const payload = {
-        version: 1,
-        savedAt: Date.now(),
-        docTitle,
-        docSubtitle,
-        notes: notesRef.current,
-        textAnnotations: textAnnotationsRef.current,
-        pictures: picturesRef.current,
-        includePageNumbers: includePageNumbersRef.current,
-        darkMode: darkModeRef.current,
-        viewMode: viewModeRef.current,
-        zoomLevel: zoomLevelRef.current,
-        pageNum: pageNumRef.current,
-        totalPages,
-        selectedObject: selectedObjectRef.current,
-      };
-      window.localStorage.setItem("colora-editor-state", JSON.stringify(payload));
-      setIsSaving(false);
-      setLastSavedLabel(`Saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      setLastSavedLabel("Saving locally...");
+      void serializeCloudState().then(payload => {
+        window.localStorage.setItem("colora-editor-state", JSON.stringify({
+          version: 2,
+          savedAt: Date.now(),
+          payload,
+        }));
+        setLastSavedLabel(`Local saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      }).catch(() => {
+        setLastSavedLabel("Local save failed");
+      }).finally(() => {
+        setIsSaving(false);
+      });
     }, 250);
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -3402,35 +3396,13 @@ export default function EditorPage() {
     pageNum,
     totalPages,
     selectedObject,
+    isPdfLoaded,
+    serializeCloudState,
   ]);
 
-  useEffect(() => {
-    if (!cloudDraftsEnabled || !cloudReady || !isPdfLoaded) return;
+  useEffect(() => () => {
     if (cloudAutosaveTimerRef.current) window.clearTimeout(cloudAutosaveTimerRef.current);
-    cloudAutosaveTimerRef.current = window.setTimeout(() => {
-      void saveCloudDocument("auto");
-    }, 5000);
-    return () => {
-      if (cloudAutosaveTimerRef.current) window.clearTimeout(cloudAutosaveTimerRef.current);
-    };
-  }, [
-    cloudDraftsEnabled,
-    cloudReady,
-    docTitle,
-    docSubtitle,
-    notes,
-    textAnnotations,
-    pictures,
-    includePageNumbers,
-    darkMode,
-    viewMode,
-    zoomLevel,
-    pageNum,
-    totalPages,
-    selectedObject,
-    isPdfLoaded,
-    saveCloudDocument,
-  ]);
+  }, []);
 
   useEffect(() => {
     const raw = window.localStorage.getItem("colora-editor-state");
@@ -3438,6 +3410,15 @@ export default function EditorPage() {
     try {
       const saved = JSON.parse(raw);
       window.setTimeout(() => {
+        if (saved.payload?.pages) {
+          void hydrateCloudState(saved.payload).then(() => {
+            const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
+            setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+          }).catch(() => {
+            setLastSavedLabel("Could not recover local draft");
+          });
+          return;
+        }
         if (saved.docTitle) setDocTitle(saved.docTitle);
         if (saved.docSubtitle) setDocSubtitle(saved.docSubtitle);
         if (Array.isArray(saved.notes)) setNotes(saved.notes);
@@ -3452,14 +3433,60 @@ export default function EditorPage() {
     } catch {
       // Ignore malformed local state.
     }
-  }, []);
+  }, [hydrateCloudState]);
 
-  useEffect(() => {
-    if (!cloudDraftsEnabled || !cloudReady) return;
+  const loadLocalDraft = useCallback(async (): Promise<boolean> => {
     const raw = window.localStorage.getItem("colora-editor-state");
-    if (raw) return;
-    void loadCloudDocument(true);
-  }, [cloudDraftsEnabled, cloudReady, loadCloudDocument]);
+    if (!raw) {
+      toast("No local draft found");
+      return false;
+    }
+
+    try {
+      const saved = JSON.parse(raw) as { savedAt?: number; payload?: CloudEditorState };
+      if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
+      await hydrateCloudState(saved.payload);
+      const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
+      setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      toast("Last local draft opened");
+      return true;
+    } catch {
+      toast("Could not open local draft");
+      return false;
+    }
+  }, [hydrateCloudState, toast]);
+
+  const saveLocalDraftNow = useCallback(async (): Promise<boolean> => {
+    if (!isPdfLoadedRef.current) {
+      toast("Open or create a document first");
+      return false;
+    }
+
+    try {
+      setIsSaving(true);
+      const payload = await serializeCloudState();
+      window.localStorage.setItem("colora-editor-state", JSON.stringify({
+        version: 2,
+        savedAt: Date.now(),
+        payload,
+      }));
+      setLastSavedLabel(`Local saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      toast("Saved locally");
+      return true;
+    } catch {
+      toast("Could not save local draft");
+      setLastSavedLabel("Local save failed");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [serializeCloudState, toast]);
+
+  const clearLocalDraft = useCallback(() => {
+    window.localStorage.removeItem("colora-editor-state");
+    toast("Local draft cleared");
+    setLastSavedLabel("Local draft cleared");
+  }, [toast]);
 
   // ─── THEME ────────────────────────────────────────────────────────
   const dm = darkMode;
@@ -3983,8 +4010,8 @@ export default function EditorPage() {
                 ? authUser?.email
                   ? `Signed in as ${authUser.email}`
                   : cloudDocumentId
-                    ? "Cloud draft connected"
-                    : "Cloud draft ready"
+                    ? "Local draft ready"
+                    : "Local recovery ready"
                 : "Local autosave only"}
             </span>
           </div>
@@ -4071,7 +4098,7 @@ export default function EditorPage() {
                   Workspace
                 </span>
                 <span style={{ fontSize: "18px", fontWeight: 800, color: c.docText }}>
-                  Cloud documents
+                  Local recovery
                 </span>
               </div>
               <button
@@ -4134,15 +4161,15 @@ export default function EditorPage() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, flex: 1 }}>
                   <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {authUser?.email || "Not signed in"}
+                    This browser
                   </span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    {authUser ? "Cloud sync is ready for this account." : "Sign in to sync your draft across devices."}
+                    Your last document is saved on this browser.
                   </span>
                 </div>
                 {authUser ? (
                   <button
-                    onClick={() => void signOutCloud()}
+                    onClick={() => void loadLocalDraft()}
                     style={{
                       height: "34px",
                       padding: "0 12px",
@@ -4157,11 +4184,11 @@ export default function EditorPage() {
                       flexShrink: 0,
                     }}
                   >
-                    {isAuthWorking ? "..." : "Log out"}
+                    Open last
                   </button>
                 ) : (
                   <button
-                    onClick={() => void openCloudDialog("sign-in")}
+                    onClick={() => void loadLocalDraft()}
                     style={{
                       height: "34px",
                       padding: "0 12px",
@@ -4176,7 +4203,7 @@ export default function EditorPage() {
                       flexShrink: 0,
                     }}
                   >
-                    {isAuthWorking ? "..." : "Sign in"}
+                    Open last
                   </button>
                 )}
               </div>
@@ -4190,9 +4217,9 @@ export default function EditorPage() {
               }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Current draft</span>
+                    <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Last saved document</span>
                     <span style={{ fontSize: "11px", color: c.docMuted }}>
-                      {cloudDocumentId ? "Connected to a cloud document." : "No cloud document linked yet."}
+                      Automatically saved in this browser after changes.
                     </span>
                   </div>
                 <span style={{
@@ -4205,12 +4232,12 @@ export default function EditorPage() {
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                 }}>
-                  {authUser ? "Synced" : "Browser only"}
+                  Local
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                 <button
-                  onClick={() => void loadCloudDocument()}
+                  onClick={() => void loadLocalDraft()}
                   style={{
                     height: "36px",
                     borderRadius: "12px",
@@ -4223,10 +4250,10 @@ export default function EditorPage() {
                     fontWeight: 800,
                   }}
                 >
-                  Load cloud
+                  Open last
                 </button>
                 <button
-                  onClick={() => void saveCloudDocument("manual")}
+                  onClick={() => void saveLocalDraftNow()}
                   style={{
                     height: "36px",
                     borderRadius: "12px",
@@ -4239,7 +4266,7 @@ export default function EditorPage() {
                     fontWeight: 800,
                   }}
                 >
-                  {isSaving ? "Saving..." : "Save cloud"}
+                  {isSaving ? "Saving..." : "Save now"}
                 </button>
               </div>
             </div>
@@ -4256,13 +4283,13 @@ export default function EditorPage() {
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>My documents</span>
+                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>How it works</span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Open any cloud draft saved under this account.
+                    Your latest page, drawings, text, pictures, and notes stay in this browser.
                   </span>
                 </div>
                 <button
-                  onClick={() => void loadDocumentsList()}
+                  onClick={() => clearLocalDraft()}
                   style={{
                     border: "none",
                     background: "transparent",
@@ -4273,52 +4300,13 @@ export default function EditorPage() {
                     fontWeight: 800,
                   }}
                 >
-                  Refresh
+                  Clear
                 </button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {isDocumentsLoading ? (
-                  <div style={{ fontSize: "12px", color: c.docMuted, padding: "8px 2px" }}>
-                    Loading documents...
-                  </div>
-                ) : cloudDocuments.length ? (
-                  cloudDocuments.map(document => (
-                    <button
-                      key={document.id}
-                      onClick={() => void loadCloudDocumentById(document.id)}
-                      style={{
-                        width: "100%",
-                        border: "none",
-                        background: document.id === cloudDocumentId ? c.toolActive : "transparent",
-                        color: document.id === cloudDocumentId ? c.toolActiveTxt : c.docText,
-                        borderRadius: "14px",
-                        padding: "12px",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-start",
-                        gap: "4px",
-                        textAlign: "left",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <span style={{ fontSize: "12px", fontWeight: 800 }}>
-                        {document.title || "Untitled document"}
-                      </span>
-                      <span style={{ fontSize: "10px", opacity: 0.82 }}>
-                        Updated {new Date(document.updated_at).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div style={{ fontSize: "12px", color: c.docMuted, padding: "8px 2px" }}>
-                    No cloud documents yet.
-                  </div>
-                )}
+                <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
+                  Colora keeps one latest local draft. If the tab closes, reopen the editor and it will recover automatically.
+                </div>
               </div>
             </div>
           </aside>

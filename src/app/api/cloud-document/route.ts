@@ -11,8 +11,19 @@ interface SaveCloudDocumentBody {
 
 const getSupabaseEnv = () => {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ?? process.env.SUPABASE_SERVICE_KEY
+    ?? process.env.SUPABASE_SECRET_KEY;
   return { url, serviceRoleKey };
+};
+
+const getMissingSupabaseConfigMessage = (url?: string, serviceRoleKey?: string) => {
+  const missing = [
+    !url ? "SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL" : "",
+    !serviceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+  ].filter(Boolean);
+
+  return `Supabase is not configured. Missing server env: ${missing.join(", ")}.`;
 };
 
 const createSupabaseHeaders = (serviceRoleKey: string) => ({
@@ -67,7 +78,7 @@ const resolveUserId = async (request: Request, url: string) => {
 export async function GET(request: Request) {
   const { url, serviceRoleKey } = getSupabaseEnv();
   if (!url || !serviceRoleKey) {
-    return Response.json({ error: "Supabase is not configured" }, { status: 503 });
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
   }
 
   const searchParams = new URL(request.url).searchParams;
@@ -118,7 +129,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const { url, serviceRoleKey } = getSupabaseEnv();
   if (!url || !serviceRoleKey) {
-    return Response.json({ error: "Supabase is not configured" }, { status: 503 });
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
   }
 
   let body: SaveCloudDocumentBody;

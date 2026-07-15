@@ -4,9 +4,20 @@ export const runtime = "nodejs";
 
 const getSupabaseEnv = () => {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ?? process.env.SUPABASE_SERVICE_KEY
+    ?? process.env.SUPABASE_SECRET_KEY;
   const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "colora-files";
   return { url, serviceRoleKey, bucket };
+};
+
+const getMissingSupabaseConfigMessage = (url?: string, serviceRoleKey?: string) => {
+  const missing = [
+    !url ? "SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL" : "",
+    !serviceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+  ].filter(Boolean);
+
+  return `Supabase storage is not configured. Missing server env: ${missing.join(", ")}.`;
 };
 
 const createSupabaseHeaders = (serviceRoleKey: string, contentType?: string) => ({
@@ -40,7 +51,7 @@ const resolveUserId = async (request: Request, url: string) => {
 export async function POST(request: Request) {
   const { url, serviceRoleKey, bucket } = getSupabaseEnv();
   if (!url || !serviceRoleKey) {
-    return Response.json({ error: "Supabase storage is not configured" }, { status: 503 });
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
   }
 
   const formData = await request.formData().catch(() => null);

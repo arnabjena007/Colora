@@ -8,6 +8,7 @@ import type { Options as RoughOptions } from "roughjs/bin/core";
 import type { CloudCanvasStroke, CloudDocumentRecord, CloudEditorState, CloudPageSnapshot, CloudSourceFile } from "@/lib/cloud-document";
 import {
   fetchSupabaseUser,
+  getSupabasePublicEnv,
   getStoredSupabaseSession,
   signOutSupabaseSession,
   startGoogleSignIn,
@@ -1067,6 +1068,15 @@ export default function EditorPage() {
     changeViewMode: () => {},
   });
 
+  const createCloudAuthHeaders = useCallback((contentType?: string): HeadersInit => {
+    const { anonKey } = getSupabasePublicEnv();
+    return {
+      ...(contentType ? { "Content-Type": contentType } : {}),
+      ...(anonKey ? { "x-supabase-anon-key": anonKey } : {}),
+      ...(authSessionRef.current?.access_token ? { Authorization: `Bearer ${authSessionRef.current.access_token}` } : {}),
+    };
+  }, []);
+
   // Keep refs in sync with state (for event handlers)
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { activeColorRef.current = activeColor; }, [activeColor]);
@@ -1419,10 +1429,7 @@ export default function EditorPage() {
       const payload = await serializeCloudState();
       const response = await fetch("/api/cloud-document", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(authSessionRef.current?.access_token ? { Authorization: `Bearer ${authSessionRef.current.access_token}` } : {}),
-        },
+        headers: createCloudAuthHeaders("application/json"),
         body: JSON.stringify({
           documentId: cloudDocumentIdRef.current,
           browserKey: cloudBrowserKeyRef.current,
@@ -1471,9 +1478,7 @@ export default function EditorPage() {
 
       const response = await fetch("/api/cloud-storage", {
         method: "POST",
-        headers: authSessionRef.current?.access_token ? {
-          Authorization: `Bearer ${authSessionRef.current.access_token}`,
-        } : undefined,
+        headers: createCloudAuthHeaders(),
         body: formData,
       });
       const data = await response.json() as { file?: CloudSourceFile; error?: string };
@@ -1507,9 +1512,7 @@ export default function EditorPage() {
       if (cloudDocumentIdRef.current) params.set("documentId", cloudDocumentIdRef.current);
       const response = await fetch(`/api/cloud-document?${params.toString()}`, {
         cache: "no-store",
-        headers: authSessionRef.current?.access_token ? {
-          Authorization: `Bearer ${authSessionRef.current.access_token}`,
-        } : undefined,
+        headers: createCloudAuthHeaders(),
       });
       const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
       if (!response.ok || !data.document) {
@@ -1548,9 +1551,7 @@ export default function EditorPage() {
       });
       const response = await fetch(`/api/cloud-document?${params.toString()}`, {
         cache: "no-store",
-        headers: authSessionRef.current?.access_token ? {
-          Authorization: `Bearer ${authSessionRef.current.access_token}`,
-        } : undefined,
+        headers: createCloudAuthHeaders(),
       });
       const data = await response.json() as { document?: CloudDocumentRecord | null; error?: string };
       if (!response.ok || !data.document) {
@@ -1585,9 +1586,7 @@ export default function EditorPage() {
       });
       const response = await fetch(`/api/cloud-document?${params.toString()}`, {
         cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authSessionRef.current.access_token}`,
-        },
+        headers: createCloudAuthHeaders(),
       });
       const data = await response.json() as {
         documents?: Array<{ id: string; title: string; updated_at: string; created_at: string }>;

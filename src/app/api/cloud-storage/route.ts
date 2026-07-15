@@ -50,7 +50,10 @@ const resolveUserId = async (request: Request, url: string) => {
 };
 
 export async function POST(request: Request) {
-  const { url, serviceRoleKey, bucket } = getSupabaseEnv();
+  const env = getSupabaseEnv();
+  const url = env.url;
+  const serviceRoleKey = env.serviceRoleKey ?? request.headers.get("x-supabase-anon-key")?.trim();
+  const bucket = env.bucket;
   if (!url || !serviceRoleKey) {
     return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
   }

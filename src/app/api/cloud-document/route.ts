@@ -83,7 +83,8 @@ const createRestHeaders = (serviceRoleKey: string | undefined, anonKey: string |
 };
 
 export async function GET(request: Request) {
-  const { url, serviceRoleKey, anonKey } = getSupabaseEnv();
+  const { url, serviceRoleKey, anonKey: envAnonKey } = getSupabaseEnv();
+  const anonKey = envAnonKey ?? request.headers.get("x-supabase-anon-key")?.trim();
   if (!url || (!serviceRoleKey && !anonKey)) {
     return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey ?? anonKey) }, { status: 503 });
   }
@@ -139,7 +140,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { url, serviceRoleKey, anonKey } = getSupabaseEnv();
+  const { url, serviceRoleKey, anonKey: envAnonKey } = getSupabaseEnv();
+  const anonKey = envAnonKey ?? request.headers.get("x-supabase-anon-key")?.trim();
   if (!url || (!serviceRoleKey && !anonKey)) {
     return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey ?? anonKey) }, { status: 503 });
   }

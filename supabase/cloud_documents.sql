@@ -26,6 +26,38 @@ insert into storage.buckets (id, name, public)
 values ('colora-files', 'colora-files', false)
 on conflict (id) do nothing;
 
+alter table public.cloud_documents enable row level security;
+
+drop policy if exists "Users can read their cloud documents" on public.cloud_documents;
+drop policy if exists "Users can create their cloud documents" on public.cloud_documents;
+drop policy if exists "Users can update their cloud documents" on public.cloud_documents;
+drop policy if exists "Users can delete their cloud documents" on public.cloud_documents;
+
+create policy "Users can read their cloud documents"
+on public.cloud_documents
+for select
+to authenticated
+using (user_id = auth.uid());
+
+create policy "Users can create their cloud documents"
+on public.cloud_documents
+for insert
+to authenticated
+with check (user_id = auth.uid());
+
+create policy "Users can update their cloud documents"
+on public.cloud_documents
+for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+create policy "Users can delete their cloud documents"
+on public.cloud_documents
+for delete
+to authenticated
+using (user_id = auth.uid());
+
 create or replace function public.set_cloud_documents_updated_at()
 returns trigger
 language plpgsql

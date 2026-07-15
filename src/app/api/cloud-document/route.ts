@@ -14,21 +14,22 @@ const getSupabaseEnv = () => {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     ?? process.env.SUPABASE_SERVICE_KEY
     ?? process.env.SUPABASE_SECRET_KEY;
-  return { url, serviceRoleKey };
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return { url, serviceRoleKey, anonKey };
 };
 
-const getMissingSupabaseConfigMessage = (url?: string, serviceRoleKey?: string) => {
+const getMissingSupabaseConfigMessage = (url?: string, key?: string) => {
   const missing = [
     !url ? "SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL" : "",
-    !serviceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+    !key ? "SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY" : "",
   ].filter(Boolean);
 
   return `Supabase is not configured. Missing server env: ${missing.join(", ")}.`;
 };
 
-const createSupabaseHeaders = (serviceRoleKey: string) => ({
-  apikey: serviceRoleKey,
-  Authorization: `Bearer ${serviceRoleKey}`,
+const createSupabaseHeaders = (apiKey: string, bearerToken = apiKey) => ({
+  apikey: apiKey,
+  Authorization: `Bearer ${bearerToken}`,
   "Content-Type": "application/json",
   Prefer: "return=representation",
 });
@@ -54,10 +55,9 @@ const formatSupabaseError = (body: unknown, fallback: string) => {
     || fallback;
 };
 
-const resolveUserId = async (request: Request, url: string) => {
+const resolveUserSession = async (request: Request, url: string, anonKey?: string) => {
   const accessToken = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "").trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!accessToken || !anonKey) return null;
+  if (!accessToken || !anonKey) return { accessToken: null, userId: null };
 
   try {
     const response = await fetch(`${url}/auth/v1/user`, {
@@ -67,25 +67,36 @@ const resolveUserId = async (request: Request, url: string) => {
       },
       cache: "no-store",
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { accessToken: null, userId: null };
     const user = await response.json() as { id?: string };
-    return user.id ?? null;
+    return { accessToken, userId: user.id ?? null };
   } catch {
-    return null;
+    return { accessToken: null, userId: null };
   }
 };
 
+const createRestHeaders = (serviceRoleKey: string | undefined, anonKey: string | undefined, accessToken: string | null) => {
+  if (serviceRoleKey) return createSupabaseHeaders(serviceRoleKey);
+  if (anonKey && accessToken) return createSupabaseHeaders(anonKey, accessToken);
+  return null;
+};
+
 export async function GET(request: Request) {
-  const { url, serviceRoleKey } = getSupabaseEnv();
-  if (!url || !serviceRoleKey) {
-    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
+  const { url, serviceRoleKey, anonKey } = getSupabaseEnv();
+  if (!url || (!serviceRoleKey && !anonKey)) {
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey ?? anonKey) }, { status: 503 });
   }
 
   const searchParams = new URL(request.url).searchParams;
   const browserKey = searchParams.get("browserKey")?.trim();
   const documentId = searchParams.get("documentId")?.trim();
   const mode = searchParams.get("mode")?.trim();
-  const userId = await resolveUserId(request, url);
+  const { accessToken, userId } = await resolveUserSession(request, url, anonKey);
+  const restHeaders = createRestHeaders(serviceRoleKey, anonKey, accessToken);
+
+  if (!restHeaders) {
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
+  }
 
   if (!browserKey && !userId) {
     return Response.json({ error: "Missing browserKey" }, { status: 400 });
@@ -103,7 +114,7 @@ export async function GET(request: Request) {
 
   try {
     const response = await fetch(`${url}/rest/v1/cloud_documents?${query}`, {
-      headers: createSupabaseHeaders(serviceRoleKey),
+      headers: restHeaders,
       cache: "no-store",
     });
     const rows = await readSupabaseBody(response) as CloudDocumentRecord[] | { message?: string } | null;
@@ -127,9 +138,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { url, serviceRoleKey } = getSupabaseEnv();
-  if (!url || !serviceRoleKey) {
-    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
+  const { url, serviceRoleKey, anonKey } = getSupabaseEnv();
+  if (!url || (!serviceRoleKey && !anonKey)) {
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey ?? anonKey) }, { status: 503 });
   }
 
   let body: SaveCloudDocumentBody;
@@ -143,7 +154,12 @@ export async function POST(request: Request) {
   const title = body.title?.trim() || "Untitled document";
   const documentId = body.documentId?.trim();
   const payload = body.payload;
-  const userId = await resolveUserId(request, url);
+  const { accessToken, userId } = await resolveUserSession(request, url, anonKey);
+  const restHeaders = createRestHeaders(serviceRoleKey, anonKey, accessToken);
+
+  if (!restHeaders) {
+    return Response.json({ error: getMissingSupabaseConfigMessage(url, serviceRoleKey) }, { status: 503 });
+  }
 
   if (!browserKey && !userId) {
     return Response.json({ error: "Missing browserKey" }, { status: 400 });
@@ -168,13 +184,13 @@ export async function POST(request: Request) {
     if (documentId) {
       response = await fetch(`${url}/rest/v1/cloud_documents?id=eq.${encodeURIComponent(documentId)}&${ownerQuery}`, {
         method: "PATCH",
-        headers: createSupabaseHeaders(serviceRoleKey),
+        headers: restHeaders,
         body: JSON.stringify(draft),
       });
     } else {
       response = await fetch(`${url}/rest/v1/cloud_documents`, {
         method: "POST",
-        headers: createSupabaseHeaders(serviceRoleKey),
+        headers: restHeaders,
         body: JSON.stringify(draft),
       });
     }

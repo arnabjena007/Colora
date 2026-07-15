@@ -4048,11 +4048,12 @@ export default function EditorPage() {
           <aside
             style={{
               position: "fixed",
-              top: "76px",
-              right: "18px",
-              width: "360px",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(440px, calc(100vw - 28px))",
               maxWidth: "calc(100vw - 24px)",
-              maxHeight: "calc(100dvh - 94px)",
+              maxHeight: "calc(100dvh - 42px)",
               overflowY: "auto",
               background: c.panelBg,
               border: `1px solid ${c.headerBorder}`,

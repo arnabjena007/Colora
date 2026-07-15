@@ -13,7 +13,8 @@ const getSupabaseEnv = () => {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     ?? process.env.SUPABASE_SERVICE_KEY
-    ?? process.env.SUPABASE_SECRET_KEY;
+    ?? process.env.SUPABASE_SECRET_KEY
+    ?? process.env.SUPABASE_SECRET_KEYS;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   return { url, serviceRoleKey, anonKey };
 };
@@ -21,7 +22,7 @@ const getSupabaseEnv = () => {
 const getMissingSupabaseConfigMessage = (url?: string, key?: string) => {
   const missing = [
     !url ? "SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL" : "",
-    !key ? "SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY" : "",
+    !key ? "SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_SECRET_KEYS, or NEXT_PUBLIC_SUPABASE_ANON_KEY" : "",
   ].filter(Boolean);
 
   return `Supabase is not configured. Missing server env: ${missing.join(", ")}.`;

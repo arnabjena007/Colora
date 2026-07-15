@@ -6,7 +6,8 @@ const getSupabaseEnv = () => {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     ?? process.env.SUPABASE_SERVICE_KEY
-    ?? process.env.SUPABASE_SECRET_KEY;
+    ?? process.env.SUPABASE_SECRET_KEY
+    ?? process.env.SUPABASE_SECRET_KEYS;
   const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "colora-files";
   return { url, serviceRoleKey, bucket };
 };
@@ -14,7 +15,7 @@ const getSupabaseEnv = () => {
 const getMissingSupabaseConfigMessage = (url?: string, serviceRoleKey?: string) => {
   const missing = [
     !url ? "SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL" : "",
-    !serviceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+    !serviceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SERVICE_KEY, or SUPABASE_SECRET_KEYS" : "",
   ].filter(Boolean);
 
   return `Supabase storage is not configured. Missing server env: ${missing.join(", ")}.`;

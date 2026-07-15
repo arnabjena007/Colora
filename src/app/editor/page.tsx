@@ -3822,7 +3822,7 @@ export default function EditorPage() {
                   Workspace
                 </span>
                 <span style={{ fontSize: "18px", fontWeight: 800, color: c.docText }}>
-                  Local recovery
+                  Recovery
                 </span>
               </div>
               <button
@@ -3891,7 +3891,7 @@ export default function EditorPage() {
                     Local recovery
                   </span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Your latest document stays safe on this browser.
+                    Saved on this browser.
                   </span>
                 </div>
                 <button
@@ -3923,9 +3923,9 @@ export default function EditorPage() {
               }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Last saved document</span>
+                    <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Last draft</span>
                     <span style={{ fontSize: "11px", color: c.docMuted }}>
-                      Automatically saved in this browser after changes.
+                      Auto-saved locally.
                     </span>
                   </div>
                 <span style={{
@@ -3989,9 +3989,9 @@ export default function EditorPage() {
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>How it works</span>
+                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Local only</span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Your latest page, drawings, text, pictures, and notes stay in this browser.
+                    Latest work stays in this browser.
                   </span>
                 </div>
                 <button
@@ -4011,7 +4011,7 @@ export default function EditorPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
-                  Colora keeps one latest local draft. If the tab closes, reopen the editor and it will recover automatically.
+                  Reopen the editor to recover after an accidental close.
                 </div>
               </div>
             </div>
@@ -4031,7 +4031,7 @@ export default function EditorPage() {
                   {authUser ? authUser.email || "Signed in" : "Optional account"}
                 </span>
                 <span style={{ fontSize: "11px", color: c.docMuted }}>
-                  {authUser ? "Account is connected. Local recovery still works offline." : "Sign in is kept for profile access, not required for recovery."}
+                  {authUser ? "Signed in. Recovery is still local." : "Optional. Recovery works without it."}
                 </span>
               </div>
               <button

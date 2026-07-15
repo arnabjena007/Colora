@@ -2,8 +2,8 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.cloud_documents (
   id uuid primary key default gen_random_uuid(),
-  browser_key text not null,
-  user_id uuid,
+  browser_key text,
+  user_id uuid references auth.users(id) on delete cascade,
   title text not null default 'Untitled document',
   payload jsonb not null,
   created_at timestamptz not null default now(),
@@ -11,7 +11,10 @@ create table if not exists public.cloud_documents (
 );
 
 alter table public.cloud_documents
-  add column if not exists user_id uuid;
+  add column if not exists user_id uuid references auth.users(id) on delete cascade;
+
+alter table public.cloud_documents
+  alter column browser_key drop not null;
 
 create index if not exists cloud_documents_browser_key_idx
   on public.cloud_documents (browser_key, updated_at desc);

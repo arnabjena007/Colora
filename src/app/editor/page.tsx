@@ -1442,8 +1442,9 @@ export default function EditorPage() {
       setLastSavedLabel(`Cloud saved ${new Date(data.document.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       if (mode === "manual") toast("Cloud draft saved");
       return true;
-    } catch {
-      if (mode === "manual") toast("Could not save cloud draft");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save cloud draft";
+      if (mode === "manual") toast(message);
       setLastSavedLabel("Cloud save failed");
       return false;
     } finally {

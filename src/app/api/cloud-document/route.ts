@@ -22,6 +22,27 @@ const createSupabaseHeaders = (serviceRoleKey: string) => ({
   Prefer: "return=representation",
 });
 
+const readSupabaseBody = async (response: Response): Promise<unknown> => {
+  const text = await response.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return { message: text };
+  }
+};
+
+const formatSupabaseError = (body: unknown, fallback: string) => {
+  if (!body || typeof body !== "object") return fallback;
+
+  const error = body as { message?: string; details?: string; hint?: string; code?: string };
+  return [error.message, error.details, error.hint, error.code ? `(${error.code})` : ""]
+    .filter(Boolean)
+    .join(" ")
+    || fallback;
+};
+
 const resolveUserId = async (request: Request, url: string) => {
   const accessToken = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "").trim();
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -74,10 +95,13 @@ export async function GET(request: Request) {
       headers: createSupabaseHeaders(serviceRoleKey),
       cache: "no-store",
     });
-    const rows = await response.json() as CloudDocumentRecord[] | { message?: string };
+    const rows = await readSupabaseBody(response) as CloudDocumentRecord[] | { message?: string } | null;
 
     if (!response.ok) {
-      return Response.json({ error: "Could not load cloud document" }, { status: response.status });
+      return Response.json(
+        { error: formatSupabaseError(rows, "Could not load cloud document") },
+        { status: response.status },
+      );
     }
 
     if (mode === "list") {
@@ -144,9 +168,12 @@ export async function POST(request: Request) {
       });
     }
 
-    const rows = await response.json() as CloudDocumentRecord[] | { message?: string };
+    const rows = await readSupabaseBody(response) as CloudDocumentRecord[] | { message?: string } | null;
     if (!response.ok) {
-      return Response.json({ error: "Could not save cloud document" }, { status: response.status });
+      return Response.json(
+        { error: formatSupabaseError(rows, "Could not save cloud document") },
+        { status: response.status },
+      );
     }
 
     const document = Array.isArray(rows) ? rows[0] ?? null : null;

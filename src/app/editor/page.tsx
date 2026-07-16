@@ -3308,7 +3308,8 @@ export default function EditorPage() {
       ? "0 24px 70px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.05)"
       : "0 4px 28px rgba(142,141,155,0.14), 0 1px 4px rgba(142,141,155,0.08)",
   };
-  const activePalette = activeTool === "text" || activeTool === "signature"
+  const textControlsVisible = activeTool === "text" || activeTool === "signature" || selectedObject?.kind === "text" || Boolean(editingTextId);
+  const activePalette = textControlsVisible
     ? TEXT_PALETTE
     : activeTool === "highlighter"
       ? HIGHLIGHT_PALETTE
@@ -3493,7 +3494,7 @@ export default function EditorPage() {
         </div>
 
         {/* Top color and size controls */}
-        <div style={{
+        <div className="hide-scrollbar" style={{
           display: isPdfLoaded ? "flex" : "none", alignItems: "center", gap: "10px",
           background: c.sidebarBg, border: `1px solid ${c.sidebarBorder}`,
           borderRadius: "999px", padding: "7px 12px",
@@ -3503,6 +3504,9 @@ export default function EditorPage() {
           transform: "translate(-50%, -50%)",
           zIndex: 70,
           whiteSpace: "nowrap",
+          maxWidth: "min(860px, calc(100vw - 560px))",
+          overflowX: "auto",
+          overflowY: "hidden",
         }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 {activePalette.map(col => (
@@ -3574,7 +3578,7 @@ export default function EditorPage() {
               </select>
             </>
           )}
-          {((activeTool === "text" || activeTool === "signature") || selectedObject?.kind === "text" || editingTextId) && (
+          {textControlsVisible && (
             <div data-text-toolbar style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <TextDropdown

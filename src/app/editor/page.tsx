@@ -3308,9 +3308,11 @@ export default function EditorPage() {
       ? "0 24px 70px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.05)"
       : "0 4px 28px rgba(142,141,155,0.14), 0 1px 4px rgba(142,141,155,0.08)",
   };
-  const activePalette = activeTool === "text" || activeTool === "signature" || activeTool === "highlighter"
+  const activePalette = activeTool === "text" || activeTool === "signature"
     ? TEXT_PALETTE
-    : PALETTE;
+    : activeTool === "highlighter"
+      ? HIGHLIGHT_PALETTE
+      : PALETTE;
   const toolbarIconSize = 16;
   const sideIconSize = 16;
   const toolBtn = (id: string, icon: React.ReactNode, label: string, action?: () => void) => {

@@ -18,13 +18,15 @@ import {
 } from "@/lib/supabase-auth";
 import {
   deleteDriveProjectFile,
+  listDriveProjectPdfs,
   GoogleDriveConfigError,
   hasGoogleDriveToken,
   saveDriveProjectFile,
+  type DriveProjectPdf,
 } from "@/lib/google-drive";
 import {
   Highlighter, Pencil, Type, MessageSquare, Square,
-  Download, Undo2, Redo2, FolderOpen, X,
+  Download, Undo2, Redo2, FolderOpen, FileText, X,
   ChevronLeft, ChevronRight, Sun, Moon, Home,
   ZoomIn, ZoomOut, Trash2, FilePlus2, Files, Hash, PenLine,
   Hand, ArrowRight, Minus, Circle, Diamond, ImageIcon, CircleHelp,
@@ -603,28 +605,14 @@ function drawNaturalHighlightRects(
     if (rect.width < 2 || rect.height < 2) continue;
 
     const x = (rect.left - containerRect.left - 2) * scaleX;
-    const y = (rect.top - containerRect.top + rect.height * 0.12) * scaleY;
+    const y = (rect.top - containerRect.top + rect.height * 0.06) * scaleY;
     const w = (rect.width + 4) * scaleX;
-    const h = Math.max(8, (rect.height + 5) * scaleY);
-    const tilt = ((i % 2 === 0 ? -1 : 1) * Math.min(5, Math.max(2, w * 0.018))) * scaleX;
-    const wobble = Math.min(2.2, Math.max(0.8, h * 0.08));
+    const h = Math.max(8, (rect.height + 2) * scaleY);
+    const radius = Math.min(4, h * 0.24);
 
-    ctx.globalAlpha = 0.34;
+    ctx.globalAlpha = 0.42;
     ctx.beginPath();
-    ctx.moveTo(x + tilt, y + wobble);
-    ctx.lineTo(x + w + tilt * 0.35, y - wobble);
-    ctx.lineTo(x + w - tilt, y + h + wobble);
-    ctx.lineTo(x - tilt * 0.4, y + h - wobble);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.globalAlpha = 0.16;
-    ctx.beginPath();
-    ctx.moveTo(x + 1 - tilt * 0.2, y + h * 0.24);
-    ctx.lineTo(x + w - 1 + tilt * 0.2, y + h * 0.08);
-    ctx.lineTo(x + w - 2 - tilt * 0.2, y + h * 0.72);
-    ctx.lineTo(x + 2 + tilt * 0.2, y + h * 0.86);
-    ctx.closePath();
+    ctx.roundRect(x, y, w, h, radius);
     ctx.fill();
   }
 
@@ -641,14 +629,14 @@ const createNaturalHighlightStroke = (
   id: crypto.randomUUID(),
   kind: "highlight",
   color,
-  boxes: Array.from(rects).flatMap((rect, index) => {
+  boxes: Array.from(rects).flatMap(rect => {
     if (rect.width < 2 || rect.height < 2) return [];
     const x = (rect.left - containerRect.left - 2) * scaleX;
-    const y = (rect.top - containerRect.top + rect.height * 0.12) * scaleY;
+    const y = (rect.top - containerRect.top + rect.height * 0.06) * scaleY;
     const w = (rect.width + 4) * scaleX;
-    const h = Math.max(8, (rect.height + 5) * scaleY);
-    const tilt = ((index % 2 === 0 ? -1 : 1) * Math.min(5, Math.max(2, w * 0.018))) * scaleX;
-    const wobble = Math.min(2.2, Math.max(0.8, h * 0.08));
+    const h = Math.max(8, (rect.height + 2) * scaleY);
+    const tilt = 0;
+    const wobble = 0;
     return [{ x, y, w, h, tilt, wobble }];
   }),
 });
@@ -935,22 +923,10 @@ const drawHighlightStroke = (ctx: CanvasRenderingContext2D, stroke: HighlightStr
   ctx.fillStyle = stroke.color;
 
   stroke.boxes.forEach(box => {
-    ctx.globalAlpha = 0.34;
+    const radius = Math.min(4, box.h * 0.24);
+    ctx.globalAlpha = 0.42;
     ctx.beginPath();
-    ctx.moveTo(box.x + box.tilt, box.y + box.wobble);
-    ctx.lineTo(box.x + box.w + box.tilt * 0.35, box.y - box.wobble);
-    ctx.lineTo(box.x + box.w - box.tilt, box.y + box.h + box.wobble);
-    ctx.lineTo(box.x - box.tilt * 0.4, box.y + box.h - box.wobble);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.globalAlpha = 0.16;
-    ctx.beginPath();
-    ctx.moveTo(box.x + 1 - box.tilt * 0.2, box.y + box.h * 0.24);
-    ctx.lineTo(box.x + box.w - 1 + box.tilt * 0.2, box.y + box.h * 0.08);
-    ctx.lineTo(box.x + box.w - 2 - box.tilt * 0.2, box.y + box.h * 0.72);
-    ctx.lineTo(box.x + 2 + box.tilt * 0.2, box.y + box.h * 0.86);
-    ctx.closePath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, radius);
     ctx.fill();
   });
 
@@ -988,6 +964,13 @@ function createImagePdfDocument(image: HTMLImageElement): PdfDocument {
     getPage: async () => imagePage,
   };
 }
+
+const formatDriveFileSize = (size?: string) => {
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 export default function EditorPage() {
   const accountSignInEnabled = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
@@ -1031,6 +1014,8 @@ export default function EditorPage() {
   const [localSaveVersion, setLocalSaveVersion] = useState(0);
   const [currentDocId, setCurrentDocId] = useState(() => crypto.randomUUID());
   const [recentLocalDrafts, setRecentLocalDrafts] = useState<LocalDraftMeta[]>([]);
+  const [driveProjectPdfs, setDriveProjectPdfs] = useState<DriveProjectPdf[]>([]);
+  const [isLoadingDriveFiles, setIsLoadingDriveFiles] = useState(false);
   const [authSession, setAuthSession] = useState<SupabaseSession | null>(null);
   const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [isAuthWorking, setIsAuthWorking] = useState(false);
@@ -1397,6 +1382,22 @@ export default function EditorPage() {
   const refreshRecentLocalDrafts = useCallback(() => {
     setRecentLocalDrafts(readRecentLocalDrafts());
   }, [readRecentLocalDrafts]);
+
+  const refreshDriveProjectPdfs = useCallback(async () => {
+    const token = authSessionRef.current?.provider_token;
+    if (!hasGoogleDriveToken(token)) {
+      setDriveProjectPdfs([]);
+      return;
+    }
+    setIsLoadingDriveFiles(true);
+    try {
+      setDriveProjectPdfs(await listDriveProjectPdfs(token));
+    } catch {
+      toast("Could not load Drive files");
+    } finally {
+      setIsLoadingDriveFiles(false);
+    }
+  }, [toast]);
 
   const writeRecentLocalDraft = useCallback((meta: LocalDraftMeta) => {
     const key = localRecentKey(localAccountKey());
@@ -3137,7 +3138,7 @@ export default function EditorPage() {
               width: box.w * scaleX,
               height: box.h * scaleY,
               color,
-              opacity: 0.32,
+              opacity: 0.42,
               borderOpacity: 0,
             });
           });
@@ -3568,40 +3569,41 @@ export default function EditorPage() {
 
   useEffect(() => {
     refreshRecentLocalDrafts();
-  }, [authUser?.email, refreshRecentLocalDrafts]);
+    void refreshDriveProjectPdfs();
+  }, [authUser?.email, refreshDriveProjectPdfs, refreshRecentLocalDrafts]);
 
   useEffect(() => {
-    if (showWorkspacePanel) refreshRecentLocalDrafts();
-  }, [refreshRecentLocalDrafts, showWorkspacePanel]);
+    if (showWorkspacePanel) {
+      refreshRecentLocalDrafts();
+      void refreshDriveProjectPdfs();
+    }
+  }, [refreshDriveProjectPdfs, refreshRecentLocalDrafts, showWorkspacePanel]);
 
-  const confirmSaveBeforeReplace = useCallback(async (actionLabel: string) => {
+  const saveBeforeReplace = useCallback(async () => {
     if (!isPdfLoadedRef.current) return true;
-    const shouldSave = window.confirm(
-      `Save this document locally before ${actionLabel}? Colora also keeps a local recovery copy for each document.`
-    );
-    if (!shouldSave) return false;
-    return saveLocalDraftNow();
+    await saveLocalDraftNow();
+    return true;
   }, [saveLocalDraftNow]);
 
   const requestOpenFile = useCallback(async () => {
-    const ok = await confirmSaveBeforeReplace("opening another file");
+    const ok = await saveBeforeReplace();
     if (!ok) {
       toast("Open cancelled");
       return;
     }
     setShowStartDialog(false);
     fileInputRef.current?.click();
-  }, [confirmSaveBeforeReplace, toast]);
+  }, [saveBeforeReplace, toast]);
 
   const requestNewProject = useCallback(async () => {
-    const ok = await confirmSaveBeforeReplace("starting a new project");
+    const ok = await saveBeforeReplace();
     if (!ok) {
       toast("New project cancelled");
       return;
     }
     setShowStartDialog(false);
     startBlankPage();
-  }, [confirmSaveBeforeReplace, toast]);
+  }, [saveBeforeReplace, toast]);
 
   // ─── THEME ────────────────────────────────────────────────────────
   const dm = darkMode;
@@ -4473,9 +4475,9 @@ export default function EditorPage() {
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "18px", fontWeight: 900, color: c.docText }}>Recent documents</span>
+                  <span style={{ fontSize: "18px", fontWeight: 900, color: c.docText }}>Drive saves</span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Local previews
+                    {hasGoogleDriveToken(authSession?.provider_token) ? "Google Drive / colora-projects" : "Sign in to connect Drive"}
                   </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -4494,7 +4496,10 @@ export default function EditorPage() {
                   Clear current
                 </button>
                 <button
-                  onClick={refreshRecentLocalDrafts}
+                  onClick={() => {
+                    refreshRecentLocalDrafts();
+                    void refreshDriveProjectPdfs();
+                  }}
                   style={{
                     border: "none",
                     background: "transparent",
@@ -4511,100 +4516,68 @@ export default function EditorPage() {
               </div>
 
               <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
               }}>
-                {recentLocalDrafts.length ? recentLocalDrafts.map(item => (
-                  <button
-                    key={item.docId}
-                    onClick={() => void loadLocalDraftById(item.docId)}
+                {hasGoogleDriveToken(authSession?.provider_token) ? (
+                  isLoadingDriveFiles ? (
+                    <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
+                      Loading Drive PDFs...
+                    </div>
+                  ) : driveProjectPdfs.length ? driveProjectPdfs.map(file => (
+                  <a
+                    key={file.id}
+                    href={file.webViewLink || "#"}
+                    target="_blank"
+                    rel="noreferrer"
                     style={{
                       border: `1px solid ${c.headerBorder}`,
-                      borderRadius: "18px",
-                      padding: 0,
-                      overflow: "hidden",
+                      borderRadius: "16px",
+                      padding: "12px",
                       background: dm ? "rgba(20,25,35,0.72)" : "#FFFFFF",
                       cursor: "pointer",
                       fontFamily: "inherit",
-                      textAlign: "left",
-                      boxShadow: item.docId === currentDocId
-                        ? (dm ? "0 0 0 2px rgba(229,212,255,0.22)" : "0 0 0 2px rgba(229,212,255,0.62)")
-                        : "0 10px 24px rgba(142,141,155,0.08)",
+                      textDecoration: "none",
+                      display: "grid",
+                      gridTemplateColumns: "42px minmax(0, 1fr) auto",
+                      alignItems: "center",
+                      gap: "12px",
+                      boxShadow: "0 10px 24px rgba(142,141,155,0.08)",
                     }}
                   >
                     <div style={{
-                      height: "190px",
-                      background: dm ? "#111722" : "#F8F6FD",
-                      borderBottom: `1px solid ${c.headerBorder}`,
+                      width: "42px",
+                      height: "42px",
+                      borderRadius: "14px",
+                      background: dm ? "#232938" : "#FFF1ED",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      overflow: "hidden",
-                      position: "relative",
+                      color: "#E74B3B",
                     }}>
-                      {item.previewDataUrl ? (
-                        <img
-                          src={item.previewDataUrl}
-                          alt=""
-                          style={{
-                            width: "82%",
-                            height: "110%",
-                            objectFit: "cover",
-                            objectPosition: "top center",
-                            borderRadius: "6px",
-                            boxShadow: dm ? "0 10px 28px rgba(0,0,0,0.22)" : "0 10px 28px rgba(142,141,155,0.15)",
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          width: "70%",
-                          height: "86%",
-                          borderRadius: "6px",
-                          background: dm ? "#1C2230" : "#FFFFFF",
-                          border: `1px solid ${c.headerBorder}`,
-                          boxShadow: dm ? "none" : "0 10px 28px rgba(142,141,155,0.12)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: c.docMuted,
-                        }}>
-                          <BlankPageIcon size={34} />
-                        </div>
-                      )}
-                      {item.docId === currentDocId && (
-                        <span style={{
-                          position: "absolute",
-                          top: "8px",
-                          right: "8px",
-                          borderRadius: "999px",
-                          padding: "5px 8px",
-                          background: c.toolActive,
-                          color: c.toolActiveTxt,
-                          fontSize: "9px",
-                          fontWeight: 900,
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase",
-                        }}>
-                          Current
-                        </span>
-                      )}
+                      <FileText size={18} />
                     </div>
-                    <div style={{ padding: "13px", display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px", minWidth: 0 }}>
                       <span style={{ fontSize: "14px", fontWeight: 850, color: c.docText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.title || "Untitled document"}
+                        {file.name}
                       </span>
                       <span style={{ fontSize: "10px", color: c.docMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                      <span style={{ fontSize: "10px", color: c.docMuted }}>
-                        {item.pageCount} page{item.pageCount === 1 ? "" : "s"} · Local
+                        {file.folderName} · {file.modifiedTime ? new Date(file.modifiedTime).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Drive PDF"}
                       </span>
                     </div>
-                  </button>
-                )) : (
+                    <span style={{ fontSize: "10px", color: c.docMuted, fontWeight: 800, whiteSpace: "nowrap" }}>
+                      {formatDriveFileSize(file.size) || "PDF"}
+                    </span>
+                  </a>
+                  )) : (
+                    <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
+                      No Drive PDFs yet. Use Save now to add one to colora-projects.
+                    </div>
+                  )
+                ) : (
                   <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
-                    No saved local documents yet. Save or edit a document and it will appear here.
+                    Sign in with Google to see saved PDFs from Drive here.
                   </div>
                 )}
               </div>
@@ -5586,7 +5559,7 @@ export default function EditorPage() {
                 </button>
 
                 <button
-                  onClick={() => setShowStartDialog(true)}
+                  onClick={() => void requestOpenFile()}
                   style={{
                     border: `1px solid ${c.panelBorder}`,
                     borderRadius: "18px",

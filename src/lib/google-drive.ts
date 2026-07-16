@@ -13,6 +13,9 @@ type DriveFile = {
   id: string;
   name: string;
   modifiedTime?: string;
+  size?: string;
+  webViewLink?: string;
+  parents?: string[];
 };
 
 const driveHeaders = (token: string) => ({
@@ -43,6 +46,19 @@ const findDriveFile = async (token: string, query: string): Promise<DriveFile | 
   if (!response.ok) throw new Error("Could not read Google Drive files.");
   const data = await response.json() as { files?: DriveFile[] };
   return data.files?.[0] ?? null;
+};
+
+const listDriveFiles = async (token: string, query: string, pageSize = 50): Promise<DriveFile[]> => {
+  const response = await fetch(
+    `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime,size,webViewLink,parents)&pageSize=${pageSize}&orderBy=modifiedTime desc`,
+    {
+      headers: driveHeaders(token),
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) throw new Error("Could not list Google Drive files.");
+  const data = await response.json() as { files?: DriveFile[] };
+  return data.files ?? [];
 };
 
 const createDriveFolder = async (token: string, name: string, parentId?: string) => {
@@ -77,6 +93,15 @@ const getDriveChildFolder = async (token: string, parentId: string, name: string
 };
 
 const dateFolderName = () => new Date().toISOString().slice(0, 10);
+
+export type DriveProjectPdf = {
+  id: string;
+  name: string;
+  modifiedTime?: string;
+  size?: string;
+  webViewLink?: string;
+  folderName: string;
+};
 
 export const findDriveProjectFile = async (token: string, name: string, parentId?: string): Promise<DriveFile | null> => {
   const accessToken = ensureToken(token);
@@ -149,4 +174,33 @@ export const saveDriveProjectFile = async (
   if (!response.ok) throw new Error("Could not create Google Drive file.");
   const created = await response.json() as { id: string };
   return created.id;
+};
+
+export const listDriveProjectPdfs = async (token: string | undefined): Promise<DriveProjectPdf[]> => {
+  const accessToken = ensureToken(token);
+  const projectFolder = await getDriveProjectFolder(accessToken);
+  const dateFolders = await listDriveFiles(
+    accessToken,
+    `mimeType='application/vnd.google-apps.folder' and '${projectFolder.id}' in parents and trashed=false`,
+    30
+  );
+  const pdfGroups = await Promise.all(dateFolders.map(async folder => {
+    const files = await listDriveFiles(
+      accessToken,
+      `mimeType='application/pdf' and '${folder.id}' in parents and trashed=false`,
+      30
+    );
+    return files.map(file => ({
+      id: file.id,
+      name: file.name,
+      modifiedTime: file.modifiedTime,
+      size: file.size,
+      webViewLink: file.webViewLink,
+      folderName: folder.name,
+    }));
+  }));
+  return pdfGroups
+    .flat()
+    .sort((a, b) => new Date(b.modifiedTime ?? 0).getTime() - new Date(a.modifiedTime ?? 0).getTime())
+    .slice(0, 60);
 };

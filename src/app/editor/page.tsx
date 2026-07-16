@@ -215,6 +215,17 @@ const localDraftKey = (docId: string) => `colora-editor-state:${docId}`;
 const localRecentKey = (accountKey: string) => `colora-recent-docs:${accountKey}`;
 const DRIVE_RECENT_FILE_NAME = "colora-recent-documents.json";
 const drivePdfFileName = (title: string) => `${(title || "document").replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, "-").toLowerCase() || "document"}.pdf`;
+const hexToPdfRgb = (hex: string) => {
+  const clean = hex.replace("#", "");
+  const value = clean.length === 3
+    ? clean.split("").map(ch => ch + ch).join("")
+    : clean.padEnd(6, "0").slice(0, 6);
+  return {
+    r: parseInt(value.slice(0, 2), 16) / 255,
+    g: parseInt(value.slice(2, 4), 16) / 255,
+    b: parseInt(value.slice(4, 6), 16) / 255,
+  };
+};
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
 type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
@@ -1043,6 +1054,8 @@ export default function EditorPage() {
   const shapeStartXRef = useRef(0);
   const shapeStartYRef = useRef(0);
   const pdfDocRef = useRef<PdfDocument | null>(null);
+  const originalPdfBytesRef = useRef<Uint8Array | null>(null);
+  const originalPdfPageCountRef = useRef(0);
   const pageRenderingRef = useRef(false);
   const pageNumPendingRef = useRef<number | null>(null);
   const pdfjsLibRef = useRef<PdfJsLib | null>(null);
@@ -2574,6 +2587,8 @@ export default function EditorPage() {
       return;
     }
 
+    originalPdfBytesRef.current = null;
+    originalPdfPageCountRef.current = 0;
     pagesRef.current.splice(pageNum - 1, 1);
     const shifted = new Map<number, PageState>();
     pageStoreRef.current.forEach((state, key) => {
@@ -2596,6 +2611,8 @@ export default function EditorPage() {
       savePageState(pageNum);
       const insertedPages = await readDocumentFiles(files);
       if (!insertedPages.length) return;
+      originalPdfBytesRef.current = null;
+      originalPdfPageCountRef.current = 0;
       shiftStoredPages(pageNum + 1, insertedPages.length);
       pagesRef.current.splice(pageNum, 0, ...insertedPages);
       setTotalPages(pagesRef.current.length);
@@ -2615,6 +2632,8 @@ export default function EditorPage() {
       savePageState(pageNum);
       const mergedPages = await readDocumentFiles(files);
       if (!mergedPages.length) return;
+      originalPdfBytesRef.current = null;
+      originalPdfPageCountRef.current = 0;
       pagesRef.current.push(...mergedPages);
       setTotalPages(pagesRef.current.length);
       toast(`Merged ${mergedPages.length} page${mergedPages.length === 1 ? "" : "s"}`);
@@ -2631,8 +2650,13 @@ export default function EditorPage() {
     if (!files?.length) return;
     toast("Loading file...");
     try {
+      const firstFile = files[0];
+      const canPreserveOriginal = files.length === 1 && (firstFile.type === "application/pdf" || firstFile.name.toLowerCase().endsWith(".pdf"));
+      const originalBytes = canPreserveOriginal ? new Uint8Array(await firstFile.arrayBuffer()) : null;
       const loadedPages = await readDocumentFiles(files);
       if (!loadedPages.length) return;
+      originalPdfBytesRef.current = originalBytes;
+      originalPdfPageCountRef.current = originalBytes ? loadedPages.length : 0;
       pagesRef.current = loadedPages;
       pdfDocRef.current = loadedPages[0].doc;
       pageStoreRef.current.clear();
@@ -2659,6 +2683,8 @@ export default function EditorPage() {
 
   const startBlankPage = () => {
     const blankDoc = createBlankPdfDocument();
+    originalPdfBytesRef.current = null;
+    originalPdfPageCountRef.current = 0;
     blankDocRef.current = blankDoc;
     pdfDocRef.current = blankDoc;
     pagesRef.current = [{ doc: blankDoc, pageNumber: 1, name: "Untitled document" }];
@@ -2686,6 +2712,8 @@ export default function EditorPage() {
     }
 
     savePageState(pageNum);
+    originalPdfBytesRef.current = null;
+    originalPdfPageCountRef.current = 0;
     const blankDoc = blankDocRef.current ?? createBlankPdfDocument();
     blankDocRef.current = blankDoc;
     shiftStoredPages(pageNum + 1, 1);
@@ -2703,6 +2731,8 @@ export default function EditorPage() {
 
     continuingTextRef.current = true;
     savePageState(pageNum);
+    originalPdfBytesRef.current = null;
+    originalPdfPageCountRef.current = 0;
     const blankDoc = blankDocRef.current ?? createBlankPdfDocument();
     blankDocRef.current = blankDoc;
     shiftStoredPages(pageNum + 1, 1);
@@ -3072,7 +3102,151 @@ export default function EditorPage() {
     return new Blob([output], { type: "application/pdf" });
   };
 
+  const canPreserveOriginalPdf = () =>
+    Boolean(originalPdfBytesRef.current) &&
+    originalPdfPageCountRef.current === pagesRef.current.length &&
+    pagesRef.current.every((source, index) => source.pageNumber === index + 1);
+
+  async function buildPreservedPdfBlob() {
+    const originalBytes = originalPdfBytesRef.current;
+    if (!originalBytes || !canPreserveOriginalPdf()) return null;
+
+    const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+    const pdf = await PDFDocument.load(originalBytes);
+    const helvetica = await pdf.embedFont(StandardFonts.Helvetica);
+    const helveticaBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const helveticaOblique = await pdf.embedFont(StandardFonts.HelveticaOblique);
+    const pages = pdf.getPages();
+
+    for (let i = 0; i < pages.length; i += 1) {
+      const state = pageStoreRef.current.get(i + 1);
+      if (!state) continue;
+      const page = pages[i];
+      const { width: pdfWidth, height: pdfHeight } = page.getSize();
+      const scaleX = pdfWidth / state.canvasWidth;
+      const scaleY = pdfHeight / state.canvasHeight;
+
+      for (const stroke of state.strokes ?? []) {
+        const strokeColor = hexToPdfRgb(stroke.color);
+        const color = rgb(strokeColor.r, strokeColor.g, strokeColor.b);
+        if (stroke.kind === "highlight") {
+          stroke.boxes.forEach(box => {
+            page.drawRectangle({
+              x: box.x * scaleX,
+              y: pdfHeight - (box.y + box.h) * scaleY,
+              width: box.w * scaleX,
+              height: box.h * scaleY,
+              color,
+              opacity: 0.32,
+              borderOpacity: 0,
+            });
+          });
+        } else {
+          for (let pointIndex = 1; pointIndex < stroke.points.length; pointIndex += 1) {
+            const prev = stroke.points[pointIndex - 1];
+            const next = stroke.points[pointIndex];
+            page.drawLine({
+              start: { x: prev.x * scaleX, y: pdfHeight - prev.y * scaleY },
+              end: { x: next.x * scaleX, y: pdfHeight - next.y * scaleY },
+              thickness: Math.max(0.5, stroke.width * Math.max(scaleX, scaleY)),
+              color,
+              opacity: 0.95,
+            });
+          }
+        }
+      }
+
+      for (const annotation of state.textAnnotations ?? []) {
+        const textColor = hexToPdfRgb(annotation.color ?? TEXT_COLOR);
+        const font = annotation.bold ? helveticaBold : annotation.italic ? helveticaOblique : helvetica;
+        const fontSize = annotation.fontSize * scaleY;
+        const lineHeight = fontSize * annotation.lineHeight;
+        const lines = displayTextForListStyle(annotation.text, annotation.listStyle).split("\n");
+        lines.forEach((line, lineIndex) => {
+          const textWidth = font.widthOfTextAtSize(line, fontSize);
+          const baseX = annotation.x * scaleX + 6 * scaleX;
+          const maxWidth = Math.max(80, (state.canvasWidth - annotation.x - 24) * scaleX);
+          const x = annotation.align === "center"
+            ? baseX + maxWidth / 2 - textWidth / 2
+            : annotation.align === "right"
+              ? baseX + maxWidth - textWidth
+              : baseX;
+          const y = pdfHeight - (annotation.y * scaleY + 4 * scaleY + (lineIndex + 1) * lineHeight);
+          page.drawText(line, {
+            x,
+            y,
+            size: fontSize,
+            font,
+            color: rgb(textColor.r, textColor.g, textColor.b),
+          });
+          if (annotation.underline) {
+            page.drawLine({
+              start: { x, y: y - 2 },
+              end: { x: x + textWidth, y: y - 2 },
+              thickness: Math.max(0.5, fontSize * 0.05),
+              color: rgb(textColor.r, textColor.g, textColor.b),
+            });
+          }
+        });
+      }
+
+      for (const note of state.notes ?? []) {
+        const x = note.x * scaleX;
+        const y = pdfHeight - (note.y + 90) * scaleY;
+        const noteColor = hexToPdfRgb("#FEFCEC");
+        const borderColor = hexToPdfRgb("#D1B84F");
+        page.drawRectangle({
+          x,
+          y,
+          width: 170 * scaleX,
+          height: 90 * scaleY,
+          color: rgb(noteColor.r, noteColor.g, noteColor.b),
+          borderColor: rgb(borderColor.r, borderColor.g, borderColor.b),
+          borderWidth: 1.5,
+          opacity: 0.95,
+        });
+        page.drawText(note.text || "", {
+          x: x + 10 * scaleX,
+          y: y + 90 * scaleY - 24 * scaleY,
+          size: 14 * scaleY,
+          font: helvetica,
+          color: rgb(0.44, 0.4, 0.23),
+          maxWidth: 150 * scaleX,
+          lineHeight: 18 * scaleY,
+        });
+      }
+
+      for (const picture of state.pictures ?? []) {
+        try {
+          const response = await fetch(picture.src);
+          const imageBytes = new Uint8Array(await response.arrayBuffer());
+          const image = picture.src.startsWith("data:image/png")
+            ? await pdf.embedPng(imageBytes)
+            : await pdf.embedJpg(imageBytes);
+          page.drawImage(image, {
+            x: picture.x * scaleX,
+            y: pdfHeight - (picture.y + picture.height) * scaleY,
+            width: picture.width * scaleX,
+            height: picture.height * scaleY,
+          });
+        } catch {
+          // Skip images that cannot be embedded while preserving the rest of the PDF.
+        }
+      }
+    }
+
+    const bytes = await pdf.save();
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return new Blob([buffer], { type: "application/pdf" });
+  }
+
   async function buildCurrentPdfBlob() {
+    if (canPreserveOriginalPdf()) {
+      const preserved = await buildPreservedPdfBlob().catch(() => null);
+      if (preserved) return preserved;
+    }
+
     savePageState(pageNumRef.current);
     const exportedPages: PdfImagePage[] = [];
     for (let i = 0; i < pagesRef.current.length; i++) {

@@ -977,6 +977,7 @@ export default function EditorPage() {
   const [toolTipText, setToolTipText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
+  const [localSaveVersion, setLocalSaveVersion] = useState(0);
   const [authSession, setAuthSession] = useState<SupabaseSession | null>(null);
   const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [isAuthWorking, setIsAuthWorking] = useState(false);
@@ -1200,6 +1201,7 @@ export default function EditorPage() {
     } else {
       redoListRef.current = [];
     }
+    setLocalSaveVersion(version => version + 1);
   }, [captureSnapshot]);
 
   const restoreState = useCallback((snapshot: DocumentSnapshot) => {
@@ -3191,6 +3193,7 @@ export default function EditorPage() {
     pageNum,
     totalPages,
     selectedObject,
+    localSaveVersion,
     isPdfLoaded,
     serializeLocalState,
   ]);

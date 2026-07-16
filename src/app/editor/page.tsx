@@ -203,10 +203,21 @@ const BLANK_PAGE_WIDTH = 800;
 const BLANK_PAGE_HEIGHT = 1060;
 const SUPPORTED_FILE_TYPES = "application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp";
 const NOTE_PLACEHOLDER = "Click to edit...";
+const LOCAL_LATEST_DRAFT_KEY = "colora-editor-state";
+const LOCAL_DOC_ID_KEY = "colora-current-doc-id";
+const localDraftKey = (docId: string) => `colora-editor-state:${docId}`;
+const localRecentKey = (accountKey: string) => `colora-recent-docs:${accountKey}`;
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
 type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
 type ListStyle = "none" | "bullet" | "number" | "alpha";
+type LocalDraftMeta = {
+  docId: string;
+  title: string;
+  subtitle: string;
+  savedAt: number;
+  pageCount: number;
+};
 type SelectedObject =
   | { kind: "text"; id: string }
   | { kind: "note"; id: string }
@@ -998,10 +1009,13 @@ export default function EditorPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedLabel, setLastSavedLabel] = useState("Not saved yet");
   const [localSaveVersion, setLocalSaveVersion] = useState(0);
+  const [currentDocId, setCurrentDocId] = useState(() => crypto.randomUUID());
+  const [recentLocalDrafts, setRecentLocalDrafts] = useState<LocalDraftMeta[]>([]);
   const [authSession, setAuthSession] = useState<SupabaseSession | null>(null);
   const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
   const [isAuthWorking, setIsAuthWorking] = useState(false);
   const [showWorkspacePanel, setShowWorkspacePanel] = useState(false);
+  const [showStartDialog, setShowStartDialog] = useState(false);
 
   const annotCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1343,6 +1357,54 @@ export default function EditorPage() {
       pages,
     };
   }, [docSubtitle, docTitle, renderPageBackgroundDataUrl, savePageState]);
+
+  const localAccountKey = useCallback(() => authUser?.email?.trim().toLowerCase() || "local-browser", [authUser?.email]);
+
+  const readRecentLocalDrafts = useCallback(() => {
+    try {
+      const raw = window.localStorage.getItem(localRecentKey(localAccountKey()));
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => item?.docId).slice(0, 12) as LocalDraftMeta[] : [];
+    } catch {
+      return [];
+    }
+  }, [localAccountKey]);
+
+  const refreshRecentLocalDrafts = useCallback(() => {
+    setRecentLocalDrafts(readRecentLocalDrafts());
+  }, [readRecentLocalDrafts]);
+
+  const writeRecentLocalDraft = useCallback((meta: LocalDraftMeta) => {
+    const key = localRecentKey(localAccountKey());
+    const next = [
+      meta,
+      ...readRecentLocalDrafts().filter(item => item.docId !== meta.docId),
+    ].slice(0, 12);
+    window.localStorage.setItem(key, JSON.stringify(next));
+    setRecentLocalDrafts(next);
+  }, [localAccountKey, readRecentLocalDrafts]);
+
+  const persistLocalDraft = useCallback((docId: string, payload: LocalEditorState) => {
+    const savedAt = Date.now();
+    const record = {
+      version: 3,
+      docId,
+      title: payload.docTitle || "Untitled document",
+      savedAt,
+      payload,
+    };
+    window.localStorage.setItem(localDraftKey(docId), JSON.stringify(record));
+    window.localStorage.setItem(LOCAL_LATEST_DRAFT_KEY, JSON.stringify(record));
+    window.localStorage.setItem(LOCAL_DOC_ID_KEY, docId);
+    writeRecentLocalDraft({
+      docId,
+      title: payload.docTitle || "Untitled document",
+      subtitle: payload.docSubtitle || `${payload.totalPages || payload.pages.length} page${(payload.totalPages || payload.pages.length) === 1 ? "" : "s"}`,
+      savedAt,
+      pageCount: payload.totalPages || payload.pages.length || 1,
+    });
+    return savedAt;
+  }, [writeRecentLocalDraft]);
 
   const hydrateLocalState = useCallback(async (payload: LocalEditorState) => {
     const hydratedPages = await Promise.all(payload.pages.map(async page => ({
@@ -2555,6 +2617,7 @@ export default function EditorPage() {
       setPictures([]);
       setEditingTextId(null);
       const firstName = loadedPages[0].name.replace(/\.[^/.]+$/, "") || "Untitled";
+      setCurrentDocId(crypto.randomUUID());
       setDocTitle(firstName);
       setDocSubtitle(`${loadedPages.length} page${loadedPages.length === 1 ? "" : "s"}`);
       setTotalPages(loadedPages.length);
@@ -2573,6 +2636,7 @@ export default function EditorPage() {
     blankDocRef.current = blankDoc;
     pdfDocRef.current = blankDoc;
     pagesRef.current = [{ doc: blankDoc, pageNumber: 1, name: "Untitled document" }];
+    setCurrentDocId(crypto.randomUUID());
     pageStoreRef.current.clear();
     undoListRef.current = [];
     redoListRef.current = [];
@@ -3047,7 +3111,7 @@ export default function EditorPage() {
       clearActiveTool,
       undo,
       redo,
-      openFile: () => fileInputRef.current?.click(),
+      openFile: () => setShowStartDialog(true),
       addBlankPage,
       exportPDF: () => { void exportPDF(); },
       selectTool,
@@ -3185,12 +3249,8 @@ export default function EditorPage() {
       setIsSaving(true);
       setLastSavedLabel("Saving locally...");
       void serializeLocalState().then(payload => {
-        window.localStorage.setItem("colora-editor-state", JSON.stringify({
-          version: 2,
-          savedAt: Date.now(),
-          payload,
-        }));
-        setLastSavedLabel(`Local saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+        const savedAt = persistLocalDraft(currentDocId, payload);
+        setLastSavedLabel(`Local saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       }).catch(() => {
         setLastSavedLabel("Local save failed");
       }).finally(() => {
@@ -3215,16 +3275,21 @@ export default function EditorPage() {
     selectedObject,
     localSaveVersion,
     isPdfLoaded,
+    currentDocId,
+    persistLocalDraft,
     serializeLocalState,
   ]);
 
   useEffect(() => {
-    const raw = window.localStorage.getItem("colora-editor-state");
+    const latestDocId = window.localStorage.getItem(LOCAL_DOC_ID_KEY);
+    const raw = (latestDocId ? window.localStorage.getItem(localDraftKey(latestDocId)) : null)
+      ?? window.localStorage.getItem(LOCAL_LATEST_DRAFT_KEY);
     if (!raw) return;
     try {
       const saved = JSON.parse(raw);
       window.setTimeout(() => {
         if (saved.payload?.pages) {
+          if (saved.docId) setCurrentDocId(saved.docId);
           void hydrateLocalState(saved.payload).then(() => {
             const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
             setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
@@ -3250,7 +3315,9 @@ export default function EditorPage() {
   }, [hydrateLocalState]);
 
   const loadLocalDraft = useCallback(async (): Promise<boolean> => {
-    const raw = window.localStorage.getItem("colora-editor-state");
+    const latestDocId = window.localStorage.getItem(LOCAL_DOC_ID_KEY);
+    const raw = (latestDocId ? window.localStorage.getItem(localDraftKey(latestDocId)) : null)
+      ?? window.localStorage.getItem(LOCAL_LATEST_DRAFT_KEY);
     if (!raw) {
       toast("No local draft found");
       return false;
@@ -3259,6 +3326,7 @@ export default function EditorPage() {
     try {
       const saved = JSON.parse(raw) as { savedAt?: number; payload?: LocalEditorState };
       if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
+      if ("docId" in saved && typeof saved.docId === "string") setCurrentDocId(saved.docId);
       await hydrateLocalState(saved.payload);
       const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
       setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
@@ -3279,12 +3347,8 @@ export default function EditorPage() {
     try {
       setIsSaving(true);
       const payload = await serializeLocalState();
-      window.localStorage.setItem("colora-editor-state", JSON.stringify({
-        version: 2,
-        savedAt: Date.now(),
-        payload,
-      }));
-      setLastSavedLabel(`Local saved ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      const savedAt = persistLocalDraft(currentDocId, payload);
+      setLastSavedLabel(`Local saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       toast("Saved locally");
       return true;
     } catch {
@@ -3294,13 +3358,80 @@ export default function EditorPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [serializeLocalState, toast]);
+  }, [currentDocId, persistLocalDraft, serializeLocalState, toast]);
 
   const clearLocalDraft = useCallback(() => {
-    window.localStorage.removeItem("colora-editor-state");
+    window.localStorage.removeItem(localDraftKey(currentDocId));
+    window.localStorage.removeItem(LOCAL_LATEST_DRAFT_KEY);
+    window.localStorage.removeItem(LOCAL_DOC_ID_KEY);
+    const next = readRecentLocalDrafts().filter(item => item.docId !== currentDocId);
+    window.localStorage.setItem(localRecentKey(localAccountKey()), JSON.stringify(next));
+    setRecentLocalDrafts(next);
     toast("Local draft cleared");
     setLastSavedLabel("Local draft cleared");
-  }, [toast]);
+  }, [currentDocId, localAccountKey, readRecentLocalDrafts, toast]);
+
+  const loadLocalDraftById = useCallback(async (docId: string): Promise<boolean> => {
+    const raw = window.localStorage.getItem(localDraftKey(docId));
+    if (!raw) {
+      toast("Could not find that local draft");
+      refreshRecentLocalDrafts();
+      return false;
+    }
+
+    try {
+      const saved = JSON.parse(raw) as { docId?: string; savedAt?: number; payload?: LocalEditorState };
+      if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
+      setCurrentDocId(saved.docId || docId);
+      window.localStorage.setItem(LOCAL_DOC_ID_KEY, saved.docId || docId);
+      await hydrateLocalState(saved.payload);
+      const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
+      setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      setShowWorkspacePanel(false);
+      toast("Local document opened");
+      return true;
+    } catch {
+      toast("Could not open local document");
+      return false;
+    }
+  }, [hydrateLocalState, refreshRecentLocalDrafts, toast]);
+
+  useEffect(() => {
+    refreshRecentLocalDrafts();
+  }, [authUser?.email, refreshRecentLocalDrafts]);
+
+  useEffect(() => {
+    if (showWorkspacePanel) refreshRecentLocalDrafts();
+  }, [refreshRecentLocalDrafts, showWorkspacePanel]);
+
+  const confirmSaveBeforeReplace = useCallback(async (actionLabel: string) => {
+    if (!isPdfLoadedRef.current) return true;
+    const shouldSave = window.confirm(
+      `Save this document locally before ${actionLabel}? Colora also keeps a local recovery copy for each document.`
+    );
+    if (!shouldSave) return false;
+    return saveLocalDraftNow();
+  }, [saveLocalDraftNow]);
+
+  const requestOpenFile = useCallback(async () => {
+    const ok = await confirmSaveBeforeReplace("opening another file");
+    if (!ok) {
+      toast("Open cancelled");
+      return;
+    }
+    setShowStartDialog(false);
+    fileInputRef.current?.click();
+  }, [confirmSaveBeforeReplace, toast]);
+
+  const requestNewProject = useCallback(async () => {
+    const ok = await confirmSaveBeforeReplace("starting a new project");
+    if (!ok) {
+      toast("New project cancelled");
+      return;
+    }
+    setShowStartDialog(false);
+    startBlankPage();
+  }, [confirmSaveBeforeReplace, toast]);
 
   // ─── THEME ────────────────────────────────────────────────────────
   const dm = darkMode;
@@ -3850,7 +3981,7 @@ export default function EditorPage() {
             <Redo2 size={16} />
           </button>
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setShowStartDialog(true)}
             style={{
               display: "flex", alignItems: "center", gap: "7px",
               padding: "8px 16px", borderRadius: "20px",
@@ -3860,7 +3991,7 @@ export default function EditorPage() {
               fontWeight: 700, fontSize: "12px", fontFamily: "inherit",
             }}
           >
-            <FolderOpen size={15} />
+            <FilePlus2 size={15} />
             {isPdfLoaded ? "Open file" : "Open from Drive"}
           </button>
           <input ref={fileInputRef} type="file" accept={SUPPORTED_FILE_TYPES} multiple onChange={handleFile} style={{ display: "none" }} />
@@ -3869,6 +4000,138 @@ export default function EditorPage() {
           <input ref={mergePdfInputRef} type="file" accept={SUPPORTED_FILE_TYPES} multiple onChange={handleMergePdf} style={{ display: "none" }} />
         </div>
       </header>
+
+      {showStartDialog && (
+        <>
+          <div
+            onClick={() => setShowStartDialog(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(18, 22, 32, 0.20)",
+              backdropFilter: "blur(4px)",
+              zIndex: 100,
+            }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Start or open document"
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(520px, calc(100vw - 36px))",
+              borderRadius: "26px",
+              border: `1px solid ${c.headerBorder}`,
+              background: c.panelBg,
+              boxShadow: "0 30px 90px rgba(28,30,38,0.22)",
+              zIndex: 120,
+              padding: "18px",
+              color: c.docText,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "14px", marginBottom: "16px" }}>
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase", marginBottom: "5px" }}>
+                  Open file
+                </div>
+                <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 850, letterSpacing: "-0.03em", color: c.docText }}>
+                  Start a document
+                </h2>
+                <p style={{ margin: "6px 0 0", fontSize: "13px", lineHeight: 1.6, color: c.docMuted }}>
+                  Choose a blank project or upload a PDF/image from your computer.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowStartDialog(false)}
+                style={{
+                  width: "34px",
+                  height: "34px",
+                  borderRadius: "12px",
+                  border: "none",
+                  background: c.toolActive,
+                  color: c.toolActiveTxt,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px" }}>
+              <button
+                onClick={() => void requestNewProject()}
+                style={{
+                  minHeight: "138px",
+                  borderRadius: "20px",
+                  border: `1px solid ${c.headerBorder}`,
+                  background: dm ? "rgba(28,34,48,0.86)" : "linear-gradient(145deg, #FFFFFF 0%, #F8F2FF 100%)",
+                  color: c.docText,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  padding: "18px",
+                  fontFamily: "inherit",
+                  boxShadow: dm ? "none" : "0 14px 34px rgba(142,141,155,0.10)",
+                }}
+              >
+                <div style={{
+                  width: "42px",
+                  height: "42px",
+                  borderRadius: "14px",
+                  background: c.toolActive,
+                  color: c.toolActiveTxt,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: "14px",
+                }}>
+                  <FilePlus2 size={18} />
+                </div>
+                <div style={{ fontSize: "15px", fontWeight: 850, marginBottom: "6px" }}>Blank project</div>
+                <div style={{ fontSize: "12px", lineHeight: 1.55, color: c.docMuted }}>Start fresh with a clean page.</div>
+              </button>
+
+              <button
+                onClick={() => void requestOpenFile()}
+                style={{
+                  minHeight: "138px",
+                  borderRadius: "20px",
+                  border: `1px solid ${c.headerBorder}`,
+                  background: dm ? "rgba(28,34,48,0.86)" : "linear-gradient(145deg, #FFFFFF 0%, #FFF8E8 100%)",
+                  color: c.docText,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  padding: "18px",
+                  fontFamily: "inherit",
+                  boxShadow: dm ? "none" : "0 14px 34px rgba(142,141,155,0.10)",
+                }}
+              >
+                <div style={{
+                  width: "42px",
+                  height: "42px",
+                  borderRadius: "14px",
+                  background: dm ? "#2B3142" : "#E5D4FF",
+                  color: dm ? "#F2F4F8" : "#5E5D6A",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: "14px",
+                }}>
+                  <FolderOpen size={18} />
+                </div>
+                <div style={{ fontSize: "15px", fontWeight: 850, marginBottom: "6px" }}>Upload file</div>
+                <div style={{ fontSize: "12px", lineHeight: 1.55, color: c.docMuted }}>Open a PDF or image locally.</div>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── LEFT SIDEBAR ───────────────────────────────────────────── */}
       {showWorkspacePanel && (
@@ -4101,6 +4364,87 @@ export default function EditorPage() {
                 <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
                   Reopen the editor to recover after an accidental close.
                 </div>
+              </div>
+            </div>
+
+            <div style={{
+              border: `1px solid ${c.headerBorder}`,
+              borderRadius: "18px",
+              padding: "14px",
+              background: dm ? "rgba(28,34,48,0.86)" : "#FFFFFF",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Recent documents</span>
+                  <span style={{ fontSize: "11px", color: c.docMuted }}>
+                    {authUser?.email ? `For ${authUser.email}` : "Saved in this browser"}
+                  </span>
+                </div>
+                <button
+                  onClick={refreshRecentLocalDrafts}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: c.docMuted,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "11px",
+                    fontWeight: 800,
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {recentLocalDrafts.length ? recentLocalDrafts.map(item => (
+                  <div
+                    key={item.docId}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: "10px",
+                      alignItems: "center",
+                      border: `1px solid ${c.headerBorder}`,
+                      borderRadius: "14px",
+                      padding: "10px",
+                      background: dm ? "rgba(20,25,35,0.7)" : "#FBFAFF",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "3px" }}>
+                      <span style={{ fontSize: "12px", fontWeight: 850, color: c.docText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.title || "Untitled document"}
+                      </span>
+                      <span style={{ fontSize: "10px", color: c.docMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.pageCount} page{item.pageCount === 1 ? "" : "s"} · {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => void loadLocalDraftById(item.docId)}
+                      style={{
+                        height: "30px",
+                        padding: "0 10px",
+                        borderRadius: "10px",
+                        border: "none",
+                        background: item.docId === currentDocId ? c.toolActive : (dm ? "#2B3142" : "#EDE1FF"),
+                        color: item.docId === currentDocId ? c.toolActiveTxt : (dm ? "#F2F4F8" : "#5E5D6A"),
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: "10px",
+                        fontWeight: 850,
+                      }}
+                    >
+                      {item.docId === currentDocId ? "Current" : "Open"}
+                    </button>
+                  </div>
+                )) : (
+                  <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
+                    No saved local documents yet. Save or edit a document and it will appear here.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -4436,8 +4780,8 @@ export default function EditorPage() {
             className="textLayer"
             style={{
               display: isPdfLoaded ? "block" : "none",
-              zIndex: activeTool === "highlighter" ? 6 : 3,
-              pointerEvents: activeTool === "highlighter" ? "auto" : "none",
+              zIndex: activeTool === "highlighter" || activeTool === "select" ? 6 : 3,
+              pointerEvents: activeTool === "highlighter" || activeTool === "select" ? "auto" : "none",
             }}
           />
 
@@ -4456,7 +4800,7 @@ export default function EditorPage() {
                 : activeTool === "text" || activeTool === "signature" ? "text"
                 : activeTool === "eraser" ? "cell"
                 : "crosshair",
-              pointerEvents: !activeTool || activeTool === "highlighter" ? "none" : "auto",
+              pointerEvents: !activeTool || activeTool === "highlighter" || activeTool === "select" ? "none" : "auto",
             }}
             onMouseDown={onMouseDown}
             onMouseMove={onMouseMove}

@@ -122,7 +122,7 @@ body {
   opacity: 1;
   line-height: 1.0;
   z-index: 3;
-  pointer-events: none;
+  pointer-events: auto;
   text-align: initial;
   text-size-adjust: none;
   forced-color-adjust: none;
@@ -137,6 +137,7 @@ body {
   position: absolute;
   white-space: pre;
   cursor: text;
+  pointer-events: auto;
   transform-origin: 0% 0%;
   user-select: text !important;
   -webkit-user-select: text !important;

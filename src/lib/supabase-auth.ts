@@ -115,7 +115,7 @@ export const startGoogleSignIn = () => {
     "openid",
     "email",
     "profile",
-    "https://www.googleapis.com/auth/drive.appdata",
+    "https://www.googleapis.com/auth/drive.file",
   ].join(" ");
   const authUrl = `${url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&scopes=${encodeURIComponent(scopes)}`;
   if (typeof window !== "undefined") {

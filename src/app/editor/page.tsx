@@ -21,6 +21,7 @@ import {
   hasGoogleDriveToken,
   loadDriveAppDataJson,
   saveDriveAppDataJson,
+  saveDriveProjectFile,
 } from "@/lib/google-drive";
 import {
   Highlighter, Pencil, Type, MessageSquare, Square,
@@ -215,6 +216,7 @@ const localDraftKey = (docId: string) => `colora-editor-state:${docId}`;
 const localRecentKey = (accountKey: string) => `colora-recent-docs:${accountKey}`;
 const driveDraftFileName = (docId: string) => `colora-draft-${docId}.json`;
 const DRIVE_RECENT_FILE_NAME = "colora-recent-documents.json";
+const drivePdfFileName = (title: string) => `${(title || "document").replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, "-").toLowerCase() || "document"}.pdf`;
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
 type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
@@ -1431,6 +1433,10 @@ export default function EditorPage() {
     };
     await saveDriveAppDataJson(token, driveDraftFileName(docId), record);
     await saveDriveAppDataJson(token, DRIVE_RECENT_FILE_NAME, readRecentLocalDrafts());
+    if (pagesRef.current.length) {
+      const pdfBlob = await buildCurrentPdfBlob();
+      await saveDriveProjectFile(token, drivePdfFileName(payload.docTitle), pdfBlob, "application/pdf");
+    }
     return true;
   }, [readRecentLocalDrafts]);
 
@@ -3085,32 +3091,25 @@ export default function EditorPage() {
     return new Blob([output], { type: "application/pdf" });
   };
 
-  const exportPDF = async () => {
-    if (!isPdfLoaded || !pagesRef.current.length) {
-      toast("Upload a PDF first");
-      return;
-    }
-
-    try {
-      savePageState(pageNum);
-      toast("Building PDF...");
-      const exportedPages: PdfImagePage[] = [];
-      for (let i = 0; i < pagesRef.current.length; i++) {
-        const source = pagesRef.current[i];
-        const page = await source.doc.getPage(source.pageNumber);
-        const baseVp = page.getViewport({ scale: 1 });
-        const state = pageStoreRef.current.get(i + 1);
-        const editorWidth = state?.canvasWidth ?? baseVp.width;
-        const editorScale = editorWidth / baseVp.width;
-        const exportScale = Math.min(3, Math.max(1.5, 2200 / editorWidth));
-        const scale = editorScale * exportScale;
-        const vp = page.getViewport({ scale });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(vp.width);
-        canvas.height = Math.round(vp.height);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) continue;
-        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  async function buildCurrentPdfBlob() {
+    savePageState(pageNumRef.current);
+    const exportedPages: PdfImagePage[] = [];
+    for (let i = 0; i < pagesRef.current.length; i++) {
+      const source = pagesRef.current[i];
+      const page = await source.doc.getPage(source.pageNumber);
+      const baseVp = page.getViewport({ scale: 1 });
+      const state = pageStoreRef.current.get(i + 1);
+      const editorWidth = state?.canvasWidth ?? baseVp.width;
+      const editorScale = editorWidth / baseVp.width;
+      const exportScale = Math.min(3, Math.max(1.5, 2200 / editorWidth));
+      const scale = editorScale * exportScale;
+      const vp = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(vp.width);
+      canvas.height = Math.round(vp.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
 
       if (state) {
         const ann = document.createElement("canvas");
@@ -3125,14 +3124,24 @@ export default function EditorPage() {
         await drawPicturesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
         drawTextAnnotationsForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
         drawNotesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
-        }
-        if (includePageNumbersRef.current) {
-          drawPageNumber(ctx, canvas.width, canvas.height, i + 1, pagesRef.current.length);
-        }
-        exportedPages.push(await canvasToLosslessPdfImage(canvas));
       }
+      if (includePageNumbersRef.current) {
+        drawPageNumber(ctx, canvas.width, canvas.height, i + 1, pagesRef.current.length);
+      }
+      exportedPages.push(await canvasToLosslessPdfImage(canvas));
+    }
+    return buildImagePdf(exportedPages);
+  }
 
-      const blob = buildImagePdf(exportedPages);
+  const exportPDF = async () => {
+    if (!isPdfLoaded || !pagesRef.current.length) {
+      toast("Upload a PDF first");
+      return;
+    }
+
+    try {
+      toast("Building PDF...");
+      const blob = await buildCurrentPdfBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.download = `${docTitle.replace(/\s+/g, "-").toLowerCase() || "document"}.pdf`;
@@ -3318,40 +3327,6 @@ export default function EditorPage() {
     persistLocalDraft,
     serializeLocalState,
   ]);
-
-  useEffect(() => {
-    const latestDocId = window.localStorage.getItem(LOCAL_DOC_ID_KEY);
-    const raw = (latestDocId ? window.localStorage.getItem(localDraftKey(latestDocId)) : null)
-      ?? window.localStorage.getItem(LOCAL_LATEST_DRAFT_KEY);
-    if (!raw) return;
-    try {
-      const saved = JSON.parse(raw);
-      window.setTimeout(() => {
-        if (saved.payload?.pages) {
-          if (saved.docId) setCurrentDocId(saved.docId);
-          void hydrateLocalState(saved.payload).then(() => {
-            const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
-            setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
-          }).catch(() => {
-            setLastSavedLabel("Could not recover local draft");
-          });
-          return;
-        }
-        if (saved.docTitle) setDocTitle(saved.docTitle);
-        if (saved.docSubtitle) setDocSubtitle(saved.docSubtitle);
-        if (Array.isArray(saved.notes)) setNotes(saved.notes);
-        if (Array.isArray(saved.textAnnotations)) setTextAnnotations(saved.textAnnotations);
-        if (Array.isArray(saved.pictures)) setPictures(saved.pictures);
-        if (typeof saved.includePageNumbers === "boolean") setIncludePageNumbers(saved.includePageNumbers);
-        if (typeof saved.viewMode === "string") setViewMode(saved.viewMode);
-        if (typeof saved.zoomLevel === "number") setZoomLevel(saved.zoomLevel);
-        if (typeof saved.pageNum === "number") setPageNum(saved.pageNum);
-        setLastSavedLabel("Recovered local draft");
-      }, 0);
-    } catch {
-      // Ignore malformed local state.
-    }
-  }, [hydrateLocalState]);
 
   const loadLocalDraft = useCallback(async (): Promise<boolean> => {
     const latestDocId = window.localStorage.getItem(LOCAL_DOC_ID_KEY);
@@ -4512,9 +4487,9 @@ export default function EditorPage() {
                 <span style={{ fontSize: "11px", color: c.docMuted }}>
                   {authUser
                     ? hasGoogleDriveToken(authSession?.provider_token)
-                      ? "Pastelle is connected to Google Drive."
+                      ? "Pastelle saves to Drive/colora-projects."
                       : "Sign in again to connect Google Drive."
-                    : "Connect Pastelle to Google Drive for recent saves."}
+                    : "Connect Pastelle to Google Drive/colora-projects."}
                 </span>
               </div>
               <button

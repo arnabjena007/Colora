@@ -17,10 +17,9 @@ import {
   type SupabaseUser,
 } from "@/lib/supabase-auth";
 import {
+  deleteDriveProjectFile,
   GoogleDriveConfigError,
   hasGoogleDriveToken,
-  loadDriveAppDataJson,
-  saveDriveAppDataJson,
   saveDriveProjectFile,
 } from "@/lib/google-drive";
 import {
@@ -214,7 +213,6 @@ const LOCAL_LATEST_DRAFT_KEY = "colora-editor-state";
 const LOCAL_DOC_ID_KEY = "colora-current-doc-id";
 const localDraftKey = (docId: string) => `colora-editor-state:${docId}`;
 const localRecentKey = (accountKey: string) => `colora-recent-docs:${accountKey}`;
-const driveDraftFileName = (docId: string) => `colora-draft-${docId}.json`;
 const DRIVE_RECENT_FILE_NAME = "colora-recent-documents.json";
 const drivePdfFileName = (title: string) => `${(title || "document").replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, "-").toLowerCase() || "document"}.pdf`;
 type ViewMode = "fit-width" | "fit-page" | "actual";
@@ -1424,32 +1422,15 @@ export default function EditorPage() {
     const token = authSessionRef.current?.provider_token;
     if (!hasGoogleDriveToken(token)) return false;
 
-    const record = {
-      version: 3,
-      docId,
-      title: payload.docTitle || "Untitled document",
-      savedAt,
-      payload,
-    };
-    await saveDriveAppDataJson(token, driveDraftFileName(docId), record);
-    await saveDriveAppDataJson(token, DRIVE_RECENT_FILE_NAME, readRecentLocalDrafts());
+    void savedAt;
+    await deleteDriveProjectFile(token, `colora-draft-${docId}.json`).catch(() => false);
+    await deleteDriveProjectFile(token, DRIVE_RECENT_FILE_NAME).catch(() => false);
     if (pagesRef.current.length) {
       const pdfBlob = await buildCurrentPdfBlob();
       await saveDriveProjectFile(token, drivePdfFileName(payload.docTitle), pdfBlob, "application/pdf");
     }
     return true;
-  }, [readRecentLocalDrafts]);
-
-  const loadDriveRecentDrafts = useCallback(async () => {
-    const token = authSessionRef.current?.provider_token;
-    if (!hasGoogleDriveToken(token)) return false;
-    const driveRecent = await loadDriveAppDataJson<LocalDraftMeta[]>(token, DRIVE_RECENT_FILE_NAME);
-    if (!Array.isArray(driveRecent)) return false;
-    const next = driveRecent.filter(item => item?.docId).slice(0, 12);
-    window.localStorage.setItem(localRecentKey(localAccountKey()), JSON.stringify(next));
-    setRecentLocalDrafts(next);
-    return true;
-  }, [localAccountKey]);
+  }, []);
 
   const hydrateLocalState = useCallback(async (payload: LocalEditorState) => {
     const hydratedPages = await Promise.all(payload.pages.map(async page => ({
@@ -3390,16 +3371,6 @@ export default function EditorPage() {
   const loadLocalDraftById = useCallback(async (docId: string): Promise<boolean> => {
     try {
       let raw = window.localStorage.getItem(localDraftKey(docId));
-      if (!raw && hasGoogleDriveToken(authSessionRef.current?.provider_token)) {
-        const driveSaved = await loadDriveAppDataJson<{ docId?: string; savedAt?: number; payload?: LocalEditorState }>(
-          authSessionRef.current?.provider_token,
-          driveDraftFileName(docId)
-        );
-        if (driveSaved) {
-          raw = JSON.stringify(driveSaved);
-          window.localStorage.setItem(localDraftKey(docId), raw);
-        }
-      }
       if (!raw) {
         toast("Could not find that draft");
         refreshRecentLocalDrafts();
@@ -3423,12 +3394,7 @@ export default function EditorPage() {
 
   useEffect(() => {
     refreshRecentLocalDrafts();
-    if (authUser?.email && hasGoogleDriveToken(authSessionRef.current?.provider_token)) {
-      void loadDriveRecentDrafts().catch(() => {
-        toast("Could not load Drive recents");
-      });
-    }
-  }, [authUser?.email, loadDriveRecentDrafts, refreshRecentLocalDrafts, toast]);
+  }, [authUser?.email, refreshRecentLocalDrafts]);
 
   useEffect(() => {
     if (showWorkspacePanel) refreshRecentLocalDrafts();

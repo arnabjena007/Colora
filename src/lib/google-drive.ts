@@ -45,13 +45,14 @@ const findDriveFile = async (token: string, query: string): Promise<DriveFile | 
   return data.files?.[0] ?? null;
 };
 
-const createDriveFolder = async (token: string, name: string) => {
+const createDriveFolder = async (token: string, name: string, parentId?: string) => {
   const response = await fetch(`${DRIVE_API}/files?fields=id,name`, {
     method: "POST",
     headers: jsonHeaders(token),
     body: JSON.stringify({
       name,
       mimeType: "application/vnd.google-apps.folder",
+      ...(parentId ? { parents: [parentId] } : {}),
     }),
   });
   if (!response.ok) throw new Error("Could not create Google Drive folder.");
@@ -67,60 +68,34 @@ export const getDriveProjectFolder = async (token: string | undefined) => {
   return folder ?? createDriveFolder(accessToken, DRIVE_PROJECT_FOLDER_NAME);
 };
 
-export const findDriveAppDataFile = async (token: string, name: string): Promise<DriveFile | null> => {
+const getDriveChildFolder = async (token: string, parentId: string, name: string) => {
+  const folder = await findDriveFile(
+    token,
+    `name='${escapeDriveQueryValue(name)}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`
+  );
+  return folder ?? createDriveFolder(token, name, parentId);
+};
+
+const dateFolderName = () => new Date().toISOString().slice(0, 10);
+
+export const findDriveProjectFile = async (token: string, name: string, parentId?: string): Promise<DriveFile | null> => {
   const accessToken = ensureToken(token);
-  const folder = await getDriveProjectFolder(accessToken);
+  const folder = parentId ? { id: parentId } : await getDriveProjectFolder(accessToken);
   return findDriveFile(
     accessToken,
     `name='${escapeDriveQueryValue(name)}' and '${folder.id}' in parents and trashed=false`
   );
 };
 
-export const saveDriveAppDataJson = async (token: string | undefined, name: string, data: unknown) => {
+export const deleteDriveProjectFile = async (token: string | undefined, name: string) => {
   const accessToken = ensureToken(token);
-  const folder = await getDriveProjectFolder(accessToken);
-  const existing = await findDriveAppDataFile(accessToken, name);
-  const body = JSON.stringify(data);
-
-  if (existing) {
-    const response = await fetch(`${DRIVE_UPLOAD_API}/files/${existing.id}?uploadType=media`, {
-      method: "PATCH",
-      headers: jsonHeaders(accessToken),
-      body,
-    });
-    if (!response.ok) throw new Error("Could not update Google Drive save.");
-    return existing.id;
-  }
-
-  const boundary = `colora-${crypto.randomUUID()}`;
-  const metadata = {
-    name,
-    parents: [folder.id],
-    mimeType: "application/json",
-  };
-  const multipartBody = [
-    `--${boundary}`,
-    "Content-Type: application/json; charset=UTF-8",
-    "",
-    JSON.stringify(metadata),
-    `--${boundary}`,
-    "Content-Type: application/json",
-    "",
-    body,
-    `--${boundary}--`,
-  ].join("\r\n");
-
-  const response = await fetch(`${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id`, {
-    method: "POST",
-    headers: {
-      ...driveHeaders(accessToken),
-      "Content-Type": `multipart/related; boundary=${boundary}`,
-    },
-    body: multipartBody,
+  const existing = await findDriveProjectFile(accessToken, name);
+  if (!existing) return false;
+  const response = await fetch(`${DRIVE_API}/files/${existing.id}`, {
+    method: "DELETE",
+    headers: driveHeaders(accessToken),
   });
-  if (!response.ok) throw new Error("Could not create Google Drive save.");
-  const created = await response.json() as { id: string };
-  return created.id;
+  return response.ok;
 };
 
 export const saveDriveProjectFile = async (
@@ -130,8 +105,9 @@ export const saveDriveProjectFile = async (
   mimeType: string
 ) => {
   const accessToken = ensureToken(token);
-  const folder = await getDriveProjectFolder(accessToken);
-  const existing = await findDriveAppDataFile(accessToken, name);
+  const projectFolder = await getDriveProjectFolder(accessToken);
+  const folder = await getDriveChildFolder(accessToken, projectFolder.id, dateFolderName());
+  const existing = await findDriveProjectFile(accessToken, name, folder.id);
 
   if (existing) {
     const response = await fetch(`${DRIVE_UPLOAD_API}/files/${existing.id}?uploadType=media`, {
@@ -173,16 +149,4 @@ export const saveDriveProjectFile = async (
   if (!response.ok) throw new Error("Could not create Google Drive file.");
   const created = await response.json() as { id: string };
   return created.id;
-};
-
-export const loadDriveAppDataJson = async <T,>(token: string | undefined, name: string): Promise<T | null> => {
-  const accessToken = ensureToken(token);
-  const file = await findDriveAppDataFile(accessToken, name);
-  if (!file) return null;
-  const response = await fetch(`${DRIVE_API}/files/${file.id}?alt=media`, {
-    headers: driveHeaders(accessToken),
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error("Could not load Google Drive save.");
-  return await response.json() as T;
 };

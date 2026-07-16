@@ -17,6 +17,12 @@ import {
   type SupabaseUser,
 } from "@/lib/supabase-auth";
 import {
+  GoogleDriveConfigError,
+  hasGoogleDriveToken,
+  loadDriveAppDataJson,
+  saveDriveAppDataJson,
+} from "@/lib/google-drive";
+import {
   Highlighter, Pencil, Type, MessageSquare, Square,
   Download, Undo2, Redo2, FolderOpen, X,
   ChevronLeft, ChevronRight, Sun, Moon, Home,
@@ -207,6 +213,8 @@ const LOCAL_LATEST_DRAFT_KEY = "colora-editor-state";
 const LOCAL_DOC_ID_KEY = "colora-current-doc-id";
 const localDraftKey = (docId: string) => `colora-editor-state:${docId}`;
 const localRecentKey = (accountKey: string) => `colora-recent-docs:${accountKey}`;
+const driveDraftFileName = (docId: string) => `colora-draft-${docId}.json`;
+const DRIVE_RECENT_FILE_NAME = "colora-recent-documents.json";
 type ViewMode = "fit-width" | "fit-page" | "actual";
 type ShapeTool = "rect" | "ellipse" | "diamond" | "line" | "arrow";
 type ShapeFillStyle = "hachure" | "cross-hatch" | "solid";
@@ -1130,6 +1138,8 @@ export default function EditorPage() {
       const session: SupabaseSession = {
         access_token: accessToken,
         refresh_token: refreshToken,
+        provider_token: hash.get("provider_token") ?? undefined,
+        provider_refresh_token: hash.get("provider_refresh_token") ?? undefined,
         token_type: hash.get("token_type") ?? undefined,
         expires_in: hash.get("expires_in") ? Number(hash.get("expires_in")) : undefined,
       };
@@ -1407,6 +1417,33 @@ export default function EditorPage() {
     });
     return savedAt;
   }, [writeRecentLocalDraft]);
+
+  const syncLocalDraftToDrive = useCallback(async (docId: string, payload: LocalEditorState, savedAt: number) => {
+    const token = authSessionRef.current?.provider_token;
+    if (!hasGoogleDriveToken(token)) return false;
+
+    const record = {
+      version: 3,
+      docId,
+      title: payload.docTitle || "Untitled document",
+      savedAt,
+      payload,
+    };
+    await saveDriveAppDataJson(token, driveDraftFileName(docId), record);
+    await saveDriveAppDataJson(token, DRIVE_RECENT_FILE_NAME, readRecentLocalDrafts());
+    return true;
+  }, [readRecentLocalDrafts]);
+
+  const loadDriveRecentDrafts = useCallback(async () => {
+    const token = authSessionRef.current?.provider_token;
+    if (!hasGoogleDriveToken(token)) return false;
+    const driveRecent = await loadDriveAppDataJson<LocalDraftMeta[]>(token, DRIVE_RECENT_FILE_NAME);
+    if (!Array.isArray(driveRecent)) return false;
+    const next = driveRecent.filter(item => item?.docId).slice(0, 12);
+    window.localStorage.setItem(localRecentKey(localAccountKey()), JSON.stringify(next));
+    setRecentLocalDrafts(next);
+    return true;
+  }, [localAccountKey]);
 
   const hydrateLocalState = useCallback(async (payload: LocalEditorState) => {
     const hydratedPages = await Promise.all(payload.pages.map(async page => ({
@@ -3350,17 +3387,19 @@ export default function EditorPage() {
       setIsSaving(true);
       const payload = await serializeLocalState();
       const savedAt = persistLocalDraft(currentDocId, payload);
-      setLastSavedLabel(`Local saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
-      toast("Saved locally");
+      const driveSynced = await syncLocalDraftToDrive(currentDocId, payload, savedAt);
+      setLastSavedLabel(`${driveSynced ? "Drive" : "Local"} saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      toast(driveSynced ? "Saved to Google Drive" : "Saved locally");
       return true;
-    } catch {
-      toast("Could not save local draft");
-      setLastSavedLabel("Local save failed");
+    } catch (error) {
+      const message = error instanceof GoogleDriveConfigError ? error.message : "Could not save draft";
+      toast(message);
+      setLastSavedLabel("Save failed");
       return false;
     } finally {
       setIsSaving(false);
     }
-  }, [currentDocId, persistLocalDraft, serializeLocalState, toast]);
+  }, [currentDocId, persistLocalDraft, serializeLocalState, syncLocalDraftToDrive, toast]);
 
   const clearLocalDraft = useCallback(() => {
     window.localStorage.removeItem(localDraftKey(currentDocId));
@@ -3374,14 +3413,23 @@ export default function EditorPage() {
   }, [currentDocId, localAccountKey, readRecentLocalDrafts, toast]);
 
   const loadLocalDraftById = useCallback(async (docId: string): Promise<boolean> => {
-    const raw = window.localStorage.getItem(localDraftKey(docId));
-    if (!raw) {
-      toast("Could not find that local draft");
-      refreshRecentLocalDrafts();
-      return false;
-    }
-
     try {
+      let raw = window.localStorage.getItem(localDraftKey(docId));
+      if (!raw && hasGoogleDriveToken(authSessionRef.current?.provider_token)) {
+        const driveSaved = await loadDriveAppDataJson<{ docId?: string; savedAt?: number; payload?: LocalEditorState }>(
+          authSessionRef.current?.provider_token,
+          driveDraftFileName(docId)
+        );
+        if (driveSaved) {
+          raw = JSON.stringify(driveSaved);
+          window.localStorage.setItem(localDraftKey(docId), raw);
+        }
+      }
+      if (!raw) {
+        toast("Could not find that draft");
+        refreshRecentLocalDrafts();
+        return false;
+      }
       const saved = JSON.parse(raw) as { docId?: string; savedAt?: number; payload?: LocalEditorState };
       if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
       setCurrentDocId(saved.docId || docId);
@@ -3390,17 +3438,22 @@ export default function EditorPage() {
       const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
       setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       setShowWorkspacePanel(false);
-      toast("Local document opened");
+      toast("Document opened");
       return true;
     } catch {
-      toast("Could not open local document");
+      toast("Could not open document");
       return false;
     }
   }, [hydrateLocalState, refreshRecentLocalDrafts, toast]);
 
   useEffect(() => {
     refreshRecentLocalDrafts();
-  }, [authUser?.email, refreshRecentLocalDrafts]);
+    if (authUser?.email && hasGoogleDriveToken(authSessionRef.current?.provider_token)) {
+      void loadDriveRecentDrafts().catch(() => {
+        toast("Could not load Drive recents");
+      });
+    }
+  }, [authUser?.email, loadDriveRecentDrafts, refreshRecentLocalDrafts, toast]);
 
   useEffect(() => {
     if (showWorkspacePanel) refreshRecentLocalDrafts();
@@ -3565,6 +3618,12 @@ export default function EditorPage() {
     authUser?.user_metadata?.name?.trim()?.[0] ||
     "G"
   ).toUpperCase();
+  const workspaceOwnerName = (
+    authUser?.user_metadata?.full_name ||
+    authUser?.user_metadata?.name ||
+    authUser?.email?.split("@")[0] ||
+    "Local"
+  ).trim();
   const activeShapeLabel = activeShape
     ? ({ rect: "Rect", ellipse: "Ellipse", diamond: "Diamond", line: "Line", arrow: "Arrow" } as Record<ShapeTool, string>)[activeShape]
     : "Shapes";
@@ -4154,19 +4213,19 @@ export default function EditorPage() {
               top: "50%",
               left: "50%",
               transform: "translate(-50%, -50%)",
-              width: "min(400px, calc(100vw - 36px))",
+              width: "min(860px, calc(100vw - 36px))",
               maxWidth: "calc(100vw - 36px)",
               maxHeight: "calc(100dvh - 42px)",
               overflowY: "auto",
               background: c.panelBg,
               border: `1px solid ${c.headerBorder}`,
-              borderRadius: "24px",
+              borderRadius: "30px",
               boxShadow: "0 28px 80px rgba(28,30,38,0.18)",
               zIndex: 110,
-              padding: "16px",
+              padding: "22px",
               display: "flex",
               flexDirection: "column",
-              gap: "14px",
+              gap: "16px",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
@@ -4174,8 +4233,8 @@ export default function EditorPage() {
                 <span style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.12em", color: c.docMuted, textTransform: "uppercase" }}>
                   Workspace
                 </span>
-                <span style={{ fontSize: "18px", fontWeight: 800, color: c.docText }}>
-                  Recovery
+                <span style={{ fontSize: "28px", fontWeight: 900, color: c.docText, letterSpacing: "-0.04em" }}>
+                  {workspaceOwnerName}&apos;s workspace
                 </span>
               </div>
               <button
@@ -4199,21 +4258,22 @@ export default function EditorPage() {
 
             <div style={{
               border: `1px solid ${c.headerBorder}`,
-              borderRadius: "22px",
-              padding: "16px",
+              borderRadius: "24px",
+              padding: "14px",
               background: dm
                 ? "linear-gradient(145deg, rgba(38,45,62,0.92), rgba(26,31,44,0.9))"
                 : "linear-gradient(145deg, #FFFDFB 0%, #F6EFFF 58%, #FFF8E8 100%)",
               boxShadow: dm ? "0 18px 46px rgba(0,0,0,0.24)" : "0 18px 46px rgba(142,141,155,0.14)",
-              display: "flex",
-              flexDirection: "column",
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) auto",
               gap: "14px",
+              alignItems: "center",
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <div
                   style={{
-                    width: "42px",
-                    height: "42px",
+                    width: "48px",
+                    height: "48px",
                     borderRadius: "50%",
                     overflow: "hidden",
                     flexShrink: 0,
@@ -4241,71 +4301,27 @@ export default function EditorPage() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, flex: 1 }}>
                   <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    Local recovery
+                    Local autosave
                   </span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Saved on this browser.
+                    Latest draft on this browser.
                   </span>
                 </div>
-                <button
-                  onClick={() => void loadLocalDraft()}
-                  style={{
-                    height: "34px",
-                    padding: "0 12px",
-                    borderRadius: "10px",
-                    border: "none",
-                    background: dm ? "#2B3142" : "#EDE1FF",
-                    color: dm ? "#F2F4F8" : "#5E5D6A",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: "11px",
-                    fontWeight: 800,
-                    flexShrink: 0,
-                  }}
-                >
-                  Open last
-                </button>
               </div>
 
-              <div style={{
-                borderTop: `1px solid ${c.headerBorder}`,
-                paddingTop: "12px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Last draft</span>
-                    <span style={{ fontSize: "11px", color: c.docMuted }}>
-                      Auto-saved locally.
-                    </span>
-                  </div>
-                <span style={{
-                  padding: "6px 10px",
-                  borderRadius: "999px",
-                  background: c.toolActive,
-                  color: c.toolActiveTxt,
-                  fontSize: "10px",
-                  fontWeight: 900,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                }}>
-                  Local
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <button
                   onClick={() => void loadLocalDraft()}
                   style={{
-                    height: "36px",
+                    height: "38px",
+                    padding: "0 16px",
                     borderRadius: "12px",
                     border: `1px solid ${c.headerBorder}`,
                     background: "transparent",
                     color: c.docText,
                     cursor: "pointer",
                     fontFamily: "inherit",
-                    fontSize: "11px",
+                    fontSize: "12px",
                     fontWeight: 800,
                   }}
                 >
@@ -4314,14 +4330,15 @@ export default function EditorPage() {
                 <button
                   onClick={() => void saveLocalDraftNow()}
                   style={{
-                    height: "36px",
+                    height: "38px",
+                    padding: "0 16px",
                     borderRadius: "12px",
                     border: "none",
                     background: dm ? "#2B3142" : "#EDE1FF",
                     color: dm ? "#F2F4F8" : "#5E5D6A",
                     cursor: "pointer",
                     fontFamily: "inherit",
-                    fontSize: "11px",
+                    fontSize: "12px",
                     fontWeight: 800,
                   }}
                 >
@@ -4329,24 +4346,24 @@ export default function EditorPage() {
                 </button>
               </div>
             </div>
-            </div>
 
             <div style={{
               border: `1px solid ${c.headerBorder}`,
-              borderRadius: "18px",
-              padding: "14px",
-              background: dm ? "rgba(28,34,48,0.86)" : "#FBFAFF",
+              borderRadius: "24px",
+              padding: "16px",
+              background: dm ? "rgba(28,34,48,0.86)" : "#FFFFFF",
               display: "flex",
               flexDirection: "column",
-              gap: "10px",
+              gap: "14px",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Local only</span>
+                  <span style={{ fontSize: "18px", fontWeight: 900, color: c.docText }}>Recent documents</span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Latest work stays in this browser.
+                    Local previews
                   </span>
                 </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <button
                   onClick={() => clearLocalDraft()}
                   style={{
@@ -4359,32 +4376,8 @@ export default function EditorPage() {
                     fontWeight: 800,
                   }}
                 >
-                  Clear
+                  Clear current
                 </button>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
-                  Reopen the editor to recover after an accidental close.
-                </div>
-              </div>
-            </div>
-
-            <div style={{
-              border: `1px solid ${c.headerBorder}`,
-              borderRadius: "18px",
-              padding: "14px",
-              background: dm ? "rgba(28,34,48,0.86)" : "#FFFFFF",
-              display: "flex",
-              flexDirection: "column",
-              gap: "10px",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>Recent documents</span>
-                  <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    {authUser?.email ? `For ${authUser.email}` : "Saved in this browser"}
-                  </span>
-                </div>
                 <button
                   onClick={refreshRecentLocalDrafts}
                   style={{
@@ -4399,12 +4392,13 @@ export default function EditorPage() {
                 >
                   Refresh
                 </button>
+                </div>
               </div>
 
               <div style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                gap: "10px",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "14px",
               }}>
                 {recentLocalDrafts.length ? recentLocalDrafts.map(item => (
                   <button
@@ -4412,7 +4406,7 @@ export default function EditorPage() {
                     onClick={() => void loadLocalDraftById(item.docId)}
                     style={{
                       border: `1px solid ${c.headerBorder}`,
-                      borderRadius: "16px",
+                      borderRadius: "18px",
                       padding: 0,
                       overflow: "hidden",
                       background: dm ? "rgba(20,25,35,0.72)" : "#FFFFFF",
@@ -4425,7 +4419,7 @@ export default function EditorPage() {
                     }}
                   >
                     <div style={{
-                      height: "128px",
+                      height: "190px",
                       background: dm ? "#111722" : "#F8F6FD",
                       borderBottom: `1px solid ${c.headerBorder}`,
                       display: "flex",
@@ -4440,7 +4434,7 @@ export default function EditorPage() {
                           alt=""
                           style={{
                             width: "82%",
-                            height: "108%",
+                            height: "110%",
                             objectFit: "cover",
                             objectPosition: "top center",
                             borderRadius: "6px",
@@ -4481,8 +4475,8 @@ export default function EditorPage() {
                         </span>
                       )}
                     </div>
-                    <div style={{ padding: "11px", display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
-                      <span style={{ fontSize: "12px", fontWeight: 850, color: c.docText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ padding: "13px", display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
+                      <span style={{ fontSize: "14px", fontWeight: 850, color: c.docText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.title || "Untitled document"}
                       </span>
                       <span style={{ fontSize: "10px", color: c.docMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -4504,7 +4498,7 @@ export default function EditorPage() {
             <div style={{
               border: `1px solid ${c.headerBorder}`,
               borderRadius: "18px",
-              padding: "14px",
+              padding: "12px 14px",
               background: dm ? "rgba(28,34,48,0.7)" : "#FFFFFF",
               display: "flex",
               alignItems: "center",
@@ -4513,10 +4507,14 @@ export default function EditorPage() {
             }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
                 <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText }}>
-                  {authUser ? authUser.email || "Signed in" : "Optional account"}
+                  {authUser ? authUser.email || "Signed in" : "Sign in"}
                 </span>
                 <span style={{ fontSize: "11px", color: c.docMuted }}>
-                  {authUser ? "Signed in. Recovery is still local." : "Optional. Recovery works without it."}
+                  {authUser
+                    ? hasGoogleDriveToken(authSession?.provider_token)
+                      ? "Pastelle is connected to Google Drive."
+                      : "Sign in again to connect Google Drive."
+                    : "Connect Pastelle to Google Drive for recent saves."}
                 </span>
               </div>
               <button

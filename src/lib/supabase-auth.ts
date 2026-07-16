@@ -1,6 +1,8 @@
 export interface SupabaseSession {
   access_token: string;
   refresh_token?: string;
+  provider_token?: string;
+  provider_refresh_token?: string;
   expires_in?: number;
   expires_at?: number;
   token_type?: string;
@@ -109,7 +111,13 @@ export const startGoogleSignIn = () => {
     throw new SupabaseAuthConfigError("NEXT_PUBLIC_SUPABASE_URL is invalid.");
   }
   const redirectTo = getAuthRedirectUrl();
-  const authUrl = `${url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  const scopes = [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/drive.appdata",
+  ].join(" ");
+  const authUrl = `${url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&scopes=${encodeURIComponent(scopes)}`;
   if (typeof window !== "undefined") {
     window.location.assign(authUrl);
   }

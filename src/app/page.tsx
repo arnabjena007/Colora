@@ -65,41 +65,57 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="features" className="relative z-10 py-16 md:py-20 motion-fade-up motion-delay-1">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="rounded-[34px] border border-white/70 bg-white/72 backdrop-blur-md p-5 md:p-7 shadow-[0_18px_60px_rgba(142,141,155,0.10)]">
-            <div className="grid gap-4 md:grid-cols-[1.05fr_1fr] md:items-center">
-              <div className="p-3 md:p-5">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#ECEAF3] bg-[#FBFAF8] text-[11px] font-bold uppercase tracking-[0.18em] text-[#8E8D9B] mb-4">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Simple by design
-                </div>
-                <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-[#373744] mb-4">
-                  Just the tools you need, without making the page feel busy
-                </h2>
-                <p className="text-sm md:text-base leading-relaxed text-[#5E5D6A] max-w-xl">
-                  Colora keeps the landing page focused: open your document, mark it up, and export when you are done.
-                </p>
-              </div>
+      <div className="pointer-events-none absolute inset-x-0 top-[100vh] bottom-0 z-0 overflow-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(229,212,255,0.38),transparent_30%),radial-gradient(circle_at_24%_16%,rgba(214,239,255,0.28),transparent_20%),radial-gradient(circle_at_76%_22%,rgba(249,213,229,0.24),transparent_18%),linear-gradient(180deg,#FEFCFF_0%,#F8F6FD_100%)]">
+        <div className="pastel-glow-a absolute left-[6%] top-[4%] h-[34vw] min-h-[280px] w-[34vw] min-w-[280px] rounded-full bg-[radial-gradient(circle,rgba(210,224,255,0.65)_0%,rgba(210,224,255,0.24)_42%,rgba(210,224,255,0)_74%)] blur-[22px]" />
+        <div className="pastel-glow-b absolute right-[3%] top-[8%] h-[30vw] min-h-[240px] w-[30vw] min-w-[240px] rounded-full bg-[radial-gradient(circle,rgba(245,208,228,0.60)_0%,rgba(245,208,228,0.22)_44%,rgba(245,208,228,0)_74%)] blur-[20px]" />
+        <div className="pastel-glow-c absolute bottom-[18%] left-[18%] h-[28vw] min-h-[220px] w-[28vw] min-w-[220px] rounded-full bg-[radial-gradient(circle,rgba(255,233,182,0.52)_0%,rgba(255,233,182,0.18)_42%,rgba(255,233,182,0)_72%)] blur-[24px]" />
+        <div className="pastel-glow-a-reverse absolute bottom-[4%] right-[12%] h-[26vw] min-h-[210px] w-[26vw] min-w-[210px] rounded-full bg-[radial-gradient(circle,rgba(196,234,220,0.58)_0%,rgba(196,234,220,0.18)_42%,rgba(196,234,220,0)_72%)] blur-[24px]" />
+      </div>
 
-              <div className="grid gap-3">
-                {[
-                  { icon: FileText, title: "Open", text: "Start blank or bring in a PDF." },
-                  { icon: PenTool, title: "Annotate", text: "Highlight, draw, add text, shapes, and notes." },
-                  { icon: Download, title: "Export", text: "Save the finished document as a clean PDF." },
-                ].map(item => (
-                  <article key={item.title} className="flex items-start gap-4 rounded-[22px] border border-[#ECEAF3] bg-[#FBFAF8]/82 p-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#E5D4FF] text-[#5E5D6A]">
-                      <item.icon className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-[#373744]">{item.title}</h3>
-                      <p className="text-sm leading-relaxed text-[#5E5D6A]">{item.text}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
+      <section className="relative z-10 -mt-20 pb-16 md:-mt-24 md:pb-20 motion-fade-up motion-delay-1">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="relative overflow-hidden rounded-[30px] border border-white/80 bg-white shadow-[0_28px_90px_rgba(142,141,155,0.20)]">
+            <video
+              src="/assets/colora-demo.mp4"
+              autoPlay
+              muted
+              playsInline
+              preload="metadata"
+              className="block aspect-video w-full object-cover"
+              aria-label="Colora editor demo video"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section id="features" className="relative z-10 pb-16 md:pb-20 motion-fade-up motion-delay-1">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="grid gap-4 md:grid-cols-3">
+            {[
+              { icon: FileText, title: "Open anything", text: "Start with a blank page or bring in a PDF/image from your device." },
+              { icon: PenTool, title: "Mark it naturally", text: "Highlight, draw, type, add notes, and place shapes without tool clutter." },
+              { icon: Download, title: "Export cleanly", text: "Keep your edits aligned and export the final document as a PDF." },
+            ].map(item => (
+              <article key={item.title} className="rounded-[28px] border border-white/75 bg-white/74 p-6 shadow-[0_18px_60px_rgba(142,141,155,0.10)] backdrop-blur-md transition-all hover:-translate-y-1 hover:bg-white">
+                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E5D4FF] text-[#5E5D6A] shadow-sm">
+                  <item.icon className="h-5 w-5" />
+                </div>
+                <h3 className="mb-2 text-xl font-bold tracking-tight text-[#373744]">{item.title}</h3>
+                <p className="text-sm leading-relaxed text-[#5E5D6A]">{item.text}</p>
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 rounded-[30px] border border-white/75 bg-[#FBFAF8]/78 p-6 text-center shadow-[0_18px_60px_rgba(142,141,155,0.10)] backdrop-blur-md md:p-8">
+            <div className="mx-auto mb-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-[#8E8D9B]">
+              <Sparkles className="h-3.5 w-3.5" />
+              Simple by design
             </div>
+            <h2 className="mx-auto max-w-3xl text-3xl font-bold tracking-tight text-[#373744] md:text-4xl">
+              A lighter way to review, annotate, and finish documents
+            </h2>
+            <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-[#5E5D6A] md:text-base">
+              Colora keeps the workspace calm, saves your latest local draft, and keeps the important controls close without overwhelming the page.
+            </p>
           </div>
         </div>
       </section>

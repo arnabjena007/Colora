@@ -178,6 +178,42 @@ body {
   }
 }
 
+@keyframes pastelGlowFloatA {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(5%, 4%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+}
+
+@keyframes pastelGlowFloatB {
+  0% {
+    transform: translate3d(3%, 0%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-5%, 5%, 0) scale(1.1);
+  }
+  100% {
+    transform: translate3d(3%, 0%, 0) scale(1);
+  }
+}
+
+@keyframes pastelGlowFloatC {
+  0% {
+    transform: translate3d(0%, 3%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, -4%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(0%, 3%, 0) scale(1);
+  }
+}
+
 .motion-fade-up {
   animation: motionFadeUp 700ms ease-out both;
 }
@@ -212,10 +248,30 @@ body {
   will-change: transform;
 }
 
+.pastel-glow-a {
+  animation: pastelGlowFloatA 20s ease-in-out infinite;
+}
+
+.pastel-glow-b {
+  animation: pastelGlowFloatB 18s ease-in-out infinite;
+}
+
+.pastel-glow-c {
+  animation: pastelGlowFloatC 24s ease-in-out infinite;
+}
+
+.pastel-glow-a-reverse {
+  animation: pastelGlowFloatA 22s ease-in-out infinite reverse;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .motion-fade-up,
   .motion-hero-pan,
-  .motion-pulse-soft {
+  .motion-pulse-soft,
+  .pastel-glow-a,
+  .pastel-glow-b,
+  .pastel-glow-c,
+  .pastel-glow-a-reverse {
     animation: none !important;
   }
 }

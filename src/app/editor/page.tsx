@@ -2277,18 +2277,21 @@ export default function EditorPage() {
     const selectionStart = input?.selectionStart;
     const selectionEnd = input?.selectionEnd;
     const hasSelection = typeof selectionStart === "number" && typeof selectionEnd === "number" && selectionStart !== selectionEnd;
+    let removedAny = false;
 
     setTextAnnotations(prev => prev.map(t => {
       if (t.id !== targetId) return t;
+      const nextHighlights = hasSelection
+        ? removeHighlightRanges(t.highlights, selectionStart, selectionEnd)
+        : [];
+      removedAny = (t.highlights?.length ?? 0) !== nextHighlights.length;
       return {
         ...t,
         highlightColor: undefined,
-        highlights: hasSelection
-          ? removeHighlightRanges(t.highlights, selectionStart, selectionEnd)
-          : [],
+        highlights: nextHighlights,
       };
     }));
-    toast(hasSelection ? "Highlight removed" : "Text highlights cleared");
+    toast(removedAny ? (hasSelection ? "Highlight removed" : "Text highlights cleared") : "No highlight on selected text");
     requestAnimationFrame(() => {
       input?.focus();
       if (hasSelection) input?.setSelectionRange(selectionStart, selectionEnd);
@@ -4590,7 +4593,19 @@ export default function EditorPage() {
                 onMouseDown={e => onTextPointerDown(annotation, e)}
                 onClick={e => {
                   e.stopPropagation();
-                  if (activeToolRef.current === "highlighter") return;
+                  if (activeToolRef.current === "highlighter") {
+                    setSelectedObject({ kind: "text", id: annotation.id });
+                    selectedObjectRef.current = { kind: "text", id: annotation.id };
+                    activeTextIdRef.current = annotation.id;
+                    setTextFontSize(annotation.fontSize);
+                    setTextLineHeight(annotation.lineHeight);
+                    setTextAlign(annotation.align ?? "left");
+                    setTextBold(Boolean(annotation.bold));
+                    setTextItalic(Boolean(annotation.italic));
+                    setTextUnderline(Boolean(annotation.underline));
+                    setTextListStyle(annotation.listStyle ?? "none");
+                    return;
+                  }
                   setActiveTool("select");
                   activeToolRef.current = "select";
                   setSelectedObject({ kind: "text", id: annotation.id });

@@ -217,6 +217,7 @@ type LocalDraftMeta = {
   subtitle: string;
   savedAt: number;
   pageCount: number;
+  previewDataUrl?: string;
 };
 type SelectedObject =
   | { kind: "text"; id: string }
@@ -1402,6 +1403,7 @@ export default function EditorPage() {
       subtitle: payload.docSubtitle || `${payload.totalPages || payload.pages.length} page${(payload.totalPages || payload.pages.length) === 1 ? "" : "s"}`,
       savedAt,
       pageCount: payload.totalPages || payload.pages.length || 1,
+      previewDataUrl: payload.pages[0]?.backgroundDataUrl,
     });
     return savedAt;
   }, [writeRecentLocalDraft]);
@@ -3992,7 +3994,7 @@ export default function EditorPage() {
             }}
           >
             <FilePlus2 size={15} />
-            {isPdfLoaded ? "Open file" : "Open from Drive"}
+            Open file
           </button>
           <input ref={fileInputRef} type="file" accept={SUPPORTED_FILE_TYPES} multiple onChange={handleFile} style={{ display: "none" }} />
           <input ref={pictureInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" onChange={handlePictureFile} style={{ display: "none" }} />
@@ -4399,47 +4401,98 @@ export default function EditorPage() {
                 </button>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                gap: "10px",
+              }}>
                 {recentLocalDrafts.length ? recentLocalDrafts.map(item => (
-                  <div
+                  <button
                     key={item.docId}
+                    onClick={() => void loadLocalDraftById(item.docId)}
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr auto",
-                      gap: "10px",
-                      alignItems: "center",
                       border: `1px solid ${c.headerBorder}`,
-                      borderRadius: "14px",
-                      padding: "10px",
-                      background: dm ? "rgba(20,25,35,0.7)" : "#FBFAFF",
+                      borderRadius: "16px",
+                      padding: 0,
+                      overflow: "hidden",
+                      background: dm ? "rgba(20,25,35,0.72)" : "#FFFFFF",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      textAlign: "left",
+                      boxShadow: item.docId === currentDocId
+                        ? (dm ? "0 0 0 2px rgba(229,212,255,0.22)" : "0 0 0 2px rgba(229,212,255,0.62)")
+                        : "0 10px 24px rgba(142,141,155,0.08)",
                     }}
                   >
-                    <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "3px" }}>
+                    <div style={{
+                      height: "128px",
+                      background: dm ? "#111722" : "#F8F6FD",
+                      borderBottom: `1px solid ${c.headerBorder}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      overflow: "hidden",
+                      position: "relative",
+                    }}>
+                      {item.previewDataUrl ? (
+                        <img
+                          src={item.previewDataUrl}
+                          alt=""
+                          style={{
+                            width: "82%",
+                            height: "108%",
+                            objectFit: "cover",
+                            objectPosition: "top center",
+                            borderRadius: "6px",
+                            boxShadow: dm ? "0 10px 28px rgba(0,0,0,0.22)" : "0 10px 28px rgba(142,141,155,0.15)",
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: "70%",
+                          height: "86%",
+                          borderRadius: "6px",
+                          background: dm ? "#1C2230" : "#FFFFFF",
+                          border: `1px solid ${c.headerBorder}`,
+                          boxShadow: dm ? "none" : "0 10px 28px rgba(142,141,155,0.12)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: c.docMuted,
+                        }}>
+                          <BlankPageIcon size={34} />
+                        </div>
+                      )}
+                      {item.docId === currentDocId && (
+                        <span style={{
+                          position: "absolute",
+                          top: "8px",
+                          right: "8px",
+                          borderRadius: "999px",
+                          padding: "5px 8px",
+                          background: c.toolActive,
+                          color: c.toolActiveTxt,
+                          fontSize: "9px",
+                          fontWeight: 900,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                        }}>
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ padding: "11px", display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
                       <span style={{ fontSize: "12px", fontWeight: 850, color: c.docText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.title || "Untitled document"}
                       </span>
                       <span style={{ fontSize: "10px", color: c.docMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.pageCount} page{item.pageCount === 1 ? "" : "s"} · {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      <span style={{ fontSize: "10px", color: c.docMuted }}>
+                        {item.pageCount} page{item.pageCount === 1 ? "" : "s"} · Local
                       </span>
                     </div>
-                    <button
-                      onClick={() => void loadLocalDraftById(item.docId)}
-                      style={{
-                        height: "30px",
-                        padding: "0 10px",
-                        borderRadius: "10px",
-                        border: "none",
-                        background: item.docId === currentDocId ? c.toolActive : (dm ? "#2B3142" : "#EDE1FF"),
-                        color: item.docId === currentDocId ? c.toolActiveTxt : (dm ? "#F2F4F8" : "#5E5D6A"),
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                        fontSize: "10px",
-                        fontWeight: 850,
-                      }}
-                    >
-                      {item.docId === currentDocId ? "Current" : "Open"}
-                    </button>
-                  </div>
+                  </button>
                 )) : (
                   <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
                     No saved local documents yet. Save or edit a document and it will appear here.
@@ -5420,7 +5473,7 @@ export default function EditorPage() {
                 </button>
 
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => setShowStartDialog(true)}
                   style={{
                     border: `1px solid ${c.panelBorder}`,
                     borderRadius: "18px",

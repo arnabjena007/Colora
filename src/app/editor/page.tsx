@@ -213,6 +213,10 @@ const SUPPORTED_FILE_TYPES = "application/pdf,image/png,image/jpeg,image/webp,im
 const NOTE_PLACEHOLDER = "Click to edit...";
 const LOCAL_LATEST_DRAFT_KEY = "colora-editor-state";
 const LOCAL_DOC_ID_KEY = "colora-current-doc-id";
+const LOCAL_DRAFT_DB_NAME = "colora-local-drafts";
+const LOCAL_DRAFT_STORE_NAME = "drafts";
+const MAX_LOCAL_DRAFTS = 3;
+const LOCAL_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const localDraftKey = (docId: string) => `colora-editor-state:${docId}`;
 const localRecentKey = (accountKey: string) => `colora-recent-docs:${accountKey}`;
 const DRIVE_RECENT_FILE_NAME = "colora-recent-documents.json";
@@ -412,6 +416,90 @@ const mergeHighlightRanges = (ranges: TextHighlightRange[] = [], next: TextHighl
   });
 
   return merged;
+};
+
+type LocalDraftRecord = {
+  version: number;
+  docId: string;
+  title: string;
+  savedAt: number;
+  payload: LocalEditorState;
+};
+
+const openLocalDraftDb = () => new Promise<IDBDatabase>((resolve, reject) => {
+  const request = indexedDB.open(LOCAL_DRAFT_DB_NAME, 1);
+  request.onupgradeneeded = () => {
+    request.result.createObjectStore(LOCAL_DRAFT_STORE_NAME);
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error ?? new Error("Could not open local draft database"));
+});
+
+const getLocalDraftFromDb = async (docId: string) => {
+  const db = await openLocalDraftDb();
+  return new Promise<LocalDraftRecord | null>((resolve, reject) => {
+    const tx = db.transaction(LOCAL_DRAFT_STORE_NAME, "readonly");
+    const request = tx.objectStore(LOCAL_DRAFT_STORE_NAME).get(docId);
+    request.onsuccess = () => resolve((request.result as LocalDraftRecord | undefined) ?? null);
+    request.onerror = () => reject(request.error ?? new Error("Could not read local draft"));
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? new Error("Could not read local draft"));
+    };
+  });
+};
+
+const saveLocalDraftToDb = async (docId: string, record: LocalDraftRecord) => {
+  const db = await openLocalDraftDb();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(LOCAL_DRAFT_STORE_NAME, "readwrite");
+    tx.objectStore(LOCAL_DRAFT_STORE_NAME).put(record, docId);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? new Error("Could not save local draft"));
+    };
+  });
+};
+
+const deleteLocalDraftFromDb = async (docId: string) => {
+  const db = await openLocalDraftDb();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(LOCAL_DRAFT_STORE_NAME, "readwrite");
+    tx.objectStore(LOCAL_DRAFT_STORE_NAME).delete(docId);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error ?? new Error("Could not delete local draft"));
+    };
+  });
+};
+
+const buildLocalPreviewDataUrl = async (page?: LocalPageSnapshot) => {
+  if (!page?.backgroundDataUrl) return undefined;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, page.canvasWidth || 1);
+  canvas.height = Math.max(1, page.canvasHeight || 1);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return page.backgroundDataUrl;
+  const background = await loadImageFromDataUrl(page.backgroundDataUrl);
+  ctx.drawImage(background, 0, 0, canvas.width, canvas.height);
+  if (page.overlayDataUrl) {
+    try {
+      const overlay = await loadImageFromDataUrl(page.overlayDataUrl);
+      ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+    } catch {
+      // Ignore preview overlay issues; background preview is still usable.
+    }
+  }
+  return canvas.toDataURL("image/png");
 };
 
 const removeHighlightRanges = (ranges: TextHighlightRange[] = [], start?: number, end?: number) => {
@@ -1021,6 +1109,7 @@ export default function EditorPage() {
   const [isAuthWorking, setIsAuthWorking] = useState(false);
   const [showWorkspacePanel, setShowWorkspacePanel] = useState(false);
   const [showStartDialog, setShowStartDialog] = useState(false);
+  const [workspaceSaveTab, setWorkspaceSaveTab] = useState<"drive" | "local">("drive");
 
   const annotCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1373,7 +1462,13 @@ export default function EditorPage() {
     try {
       const raw = window.localStorage.getItem(localRecentKey(localAccountKey()));
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.filter(item => item?.docId).slice(0, 12) as LocalDraftMeta[] : [];
+      return Array.isArray(parsed)
+        ? parsed
+            .filter(item => item?.docId && typeof item.savedAt === "number")
+            .sort((a, b) => b.savedAt - a.savedAt)
+            .filter(item => Date.now() - item.savedAt <= LOCAL_DRAFT_MAX_AGE_MS)
+            .slice(0, MAX_LOCAL_DRAFTS) as LocalDraftMeta[]
+        : [];
     } catch {
       return [];
     }
@@ -1404,33 +1499,79 @@ export default function EditorPage() {
     const next = [
       meta,
       ...readRecentLocalDrafts().filter(item => item.docId !== meta.docId),
-    ].slice(0, 12);
-    window.localStorage.setItem(key, JSON.stringify(next));
+    ]
+      .filter(item => Date.now() - item.savedAt <= LOCAL_DRAFT_MAX_AGE_MS)
+      .sort((a, b) => b.savedAt - a.savedAt)
+      .slice(0, MAX_LOCAL_DRAFTS);
+    try {
+      window.localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      const lightweight = next.map(item => ({ ...item, previewDataUrl: undefined }));
+      window.localStorage.setItem(key, JSON.stringify(lightweight));
+    }
     setRecentLocalDrafts(next);
   }, [localAccountKey, readRecentLocalDrafts]);
 
-  const persistLocalDraft = useCallback((docId: string, payload: LocalEditorState) => {
+  const pruneOldLocalDrafts = useCallback(async () => {
+    const recent = readRecentLocalDrafts();
+    const keepIds = new Set(recent.map(item => item.docId));
+    const staleKeys = Object.keys(window.localStorage).filter(key => key.startsWith("colora-editor-state:"));
+    for (const key of staleKeys) {
+      const docId = key.slice("colora-editor-state:".length);
+      if (keepIds.has(docId)) continue;
+      window.localStorage.removeItem(key);
+      await deleteLocalDraftFromDb(docId).catch(() => {});
+    }
+    try {
+      window.localStorage.setItem(localRecentKey(localAccountKey()), JSON.stringify(recent));
+    } catch {
+      const lightweight = recent.map(item => ({ ...item, previewDataUrl: undefined }));
+      window.localStorage.setItem(localRecentKey(localAccountKey()), JSON.stringify(lightweight));
+    }
+    setRecentLocalDrafts(recent);
+  }, [localAccountKey, readRecentLocalDrafts]);
+
+  const persistLocalDraft = useCallback(async (docId: string, payload: LocalEditorState) => {
     const savedAt = Date.now();
-    const record = {
+    const record: LocalDraftRecord = {
       version: 3,
       docId,
       title: payload.docTitle || "Untitled document",
       savedAt,
       payload,
     };
-    window.localStorage.setItem(localDraftKey(docId), JSON.stringify(record));
-    window.localStorage.setItem(LOCAL_LATEST_DRAFT_KEY, JSON.stringify(record));
-    window.localStorage.setItem(LOCAL_DOC_ID_KEY, docId);
+    try {
+      const serialized = JSON.stringify(record);
+      window.localStorage.setItem(localDraftKey(docId), serialized);
+      window.localStorage.setItem(LOCAL_LATEST_DRAFT_KEY, serialized);
+    } catch {
+      await saveLocalDraftToDb(docId, record);
+      try {
+        window.localStorage.removeItem(localDraftKey(docId));
+        window.localStorage.removeItem(LOCAL_LATEST_DRAFT_KEY);
+        window.localStorage.setItem(localDraftKey(docId), "__indexeddb__");
+        window.localStorage.setItem(LOCAL_LATEST_DRAFT_KEY, "__indexeddb__");
+      } catch {
+        // IndexedDB still contains the draft; the current doc id lets recovery find it.
+      }
+    }
+    try {
+      window.localStorage.setItem(LOCAL_DOC_ID_KEY, docId);
+    } catch {
+      // Ignore: the draft itself has already been written.
+    }
+    const previewDataUrl = await buildLocalPreviewDataUrl(payload.pages[0]);
     writeRecentLocalDraft({
       docId,
       title: payload.docTitle || "Untitled document",
       subtitle: payload.docSubtitle || `${payload.totalPages || payload.pages.length} page${(payload.totalPages || payload.pages.length) === 1 ? "" : "s"}`,
       savedAt,
       pageCount: payload.totalPages || payload.pages.length || 1,
-      previewDataUrl: payload.pages[0]?.backgroundDataUrl,
+      previewDataUrl: previewDataUrl && previewDataUrl.length < 350_000 ? previewDataUrl : undefined,
     });
+    void pruneOldLocalDrafts();
     return savedAt;
-  }, [writeRecentLocalDraft]);
+  }, [pruneOldLocalDrafts, writeRecentLocalDraft]);
 
   const syncLocalDraftToDrive = useCallback(async (docId: string, payload: LocalEditorState, savedAt: number) => {
     const token = authSessionRef.current?.provider_token;
@@ -3452,8 +3593,8 @@ export default function EditorPage() {
     saveTimerRef.current = window.setTimeout(() => {
       setIsSaving(true);
       setLastSavedLabel("Saving locally...");
-      void serializeLocalState().then(payload => {
-        const savedAt = persistLocalDraft(currentDocId, payload);
+      void serializeLocalState().then(async payload => {
+        const savedAt = await persistLocalDraft(currentDocId, payload);
         setLastSavedLabel(`Local saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       }).catch(() => {
         setLastSavedLabel("Local save failed");
@@ -3494,7 +3635,10 @@ export default function EditorPage() {
     }
 
     try {
-      const saved = JSON.parse(raw) as { savedAt?: number; payload?: LocalEditorState };
+      const saved = raw === "__indexeddb__" && latestDocId
+        ? await getLocalDraftFromDb(latestDocId)
+        : JSON.parse(raw) as { docId?: string; savedAt?: number; payload?: LocalEditorState };
+      if (!saved) throw new Error("Missing local draft");
       if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
       if ("docId" in saved && typeof saved.docId === "string") setCurrentDocId(saved.docId);
       await hydrateLocalState(saved.payload);
@@ -3517,7 +3661,7 @@ export default function EditorPage() {
     try {
       setIsSaving(true);
       const payload = await serializeLocalState();
-      const savedAt = persistLocalDraft(currentDocId, payload);
+      const savedAt = await persistLocalDraft(currentDocId, payload);
       const driveSynced = await syncLocalDraftToDrive(currentDocId, payload, savedAt);
       setLastSavedLabel(`${driveSynced ? "Drive" : "Local"} saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       toast(driveSynced ? "Saved to Google Drive" : "Saved locally");
@@ -3531,6 +3675,28 @@ export default function EditorPage() {
       setIsSaving(false);
     }
   }, [currentDocId, persistLocalDraft, serializeLocalState, syncLocalDraftToDrive, toast]);
+
+  const saveCurrentDocLocallyOnly = useCallback(async (): Promise<boolean> => {
+    if (!isPdfLoadedRef.current) {
+      toast("Open or create a document first");
+      return false;
+    }
+
+    try {
+      setIsSaving(true);
+      const payload = await serializeLocalState();
+      const savedAt = await persistLocalDraft(currentDocId, payload);
+      setLastSavedLabel(`Local saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      toast("Saved locally");
+      return true;
+    } catch {
+      toast("Could not save draft");
+      setLastSavedLabel("Save failed");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [currentDocId, persistLocalDraft, serializeLocalState, toast]);
 
   const clearLocalDraft = useCallback(() => {
     window.localStorage.removeItem(localDraftKey(currentDocId));
@@ -3547,11 +3713,18 @@ export default function EditorPage() {
     try {
       let raw = window.localStorage.getItem(localDraftKey(docId));
       if (!raw) {
-        toast("Could not find that draft");
-        refreshRecentLocalDrafts();
-        return false;
+        const dbDraft = await getLocalDraftFromDb(docId);
+        if (!dbDraft) {
+          toast("Could not find that draft");
+          refreshRecentLocalDrafts();
+          return false;
+        }
+        raw = "__indexeddb__";
       }
-      const saved = JSON.parse(raw) as { docId?: string; savedAt?: number; payload?: LocalEditorState };
+      const saved = raw === "__indexeddb__"
+        ? await getLocalDraftFromDb(docId)
+        : JSON.parse(raw) as { docId?: string; savedAt?: number; payload?: LocalEditorState };
+      if (!saved) throw new Error("Missing local draft");
       if (!saved.payload?.pages?.length) throw new Error("Missing local draft");
       setCurrentDocId(saved.docId || docId);
       window.localStorage.setItem(LOCAL_DOC_ID_KEY, saved.docId || docId);
@@ -4417,21 +4590,24 @@ export default function EditorPage() {
                   )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, flex: 1 }}>
-                  <span style={{ fontSize: "13px", fontWeight: 800, color: c.docText, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    Local autosave
+                  <span style={{ fontSize: "13px", fontWeight: 900, color: c.docText, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {workspaceOwnerName}
+                  </span>
+                  <span style={{ fontSize: "11px", color: c.docMuted, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {authUser?.email || "Local recovery ready"}
                   </span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    Latest draft on this browser.
+                    {authUser ? "Cloud sync is ready for this account." : "Latest draft on this browser."}
                   </span>
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <button
-                  onClick={() => void loadLocalDraft()}
+                  onClick={() => void saveCurrentDocLocallyOnly()}
                   style={{
                     height: "38px",
-                    padding: "0 16px",
+                    padding: "0 14px",
                     borderRadius: "12px",
                     border: `1px solid ${c.headerBorder}`,
                     background: "transparent",
@@ -4442,13 +4618,13 @@ export default function EditorPage() {
                     fontWeight: 800,
                   }}
                 >
-                  Open last
+                  Save locally
                 </button>
                 <button
                   onClick={() => void saveLocalDraftNow()}
                   style={{
                     height: "38px",
-                    padding: "0 16px",
+                    padding: "0 14px",
                     borderRadius: "12px",
                     border: "none",
                     background: dm ? "#2B3142" : "#EDE1FF",
@@ -4459,7 +4635,7 @@ export default function EditorPage() {
                     fontWeight: 800,
                   }}
                 >
-                  {isSaving ? "Saving..." : "Save now"}
+                  {isSaving ? "Saving..." : "Export to Drive"}
                 </button>
               </div>
             </div>
@@ -4475,9 +4651,13 @@ export default function EditorPage() {
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "18px", fontWeight: 900, color: c.docText }}>Drive saves</span>
+                  <span style={{ fontSize: "18px", fontWeight: 900, color: c.docText }}>
+                    {workspaceSaveTab === "drive" ? "Drive saves" : "Local saves"}
+                  </span>
                   <span style={{ fontSize: "11px", color: c.docMuted }}>
-                    {hasGoogleDriveToken(authSession?.provider_token) ? "Google Drive / colora-projects" : "Sign in to connect Drive"}
+                    {workspaceSaveTab === "drive"
+                      ? hasGoogleDriveToken(authSession?.provider_token) ? "Google Drive / colora-projects" : "Sign in to connect Drive"
+                      : "Saved on this browser"}
                   </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -4516,11 +4696,43 @@ export default function EditorPage() {
               </div>
 
               <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "6px",
+                padding: "4px",
+                borderRadius: "14px",
+                background: dm ? "rgba(20,25,35,0.78)" : "#F8F5FF",
+                border: `1px solid ${c.headerBorder}`,
+              }}>
+                {(["drive", "local"] as const).map(tab => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setWorkspaceSaveTab(tab)}
+                    style={{
+                      height: "34px",
+                      borderRadius: "11px",
+                      border: "none",
+                      background: workspaceSaveTab === tab ? c.toolActive : "transparent",
+                      color: workspaceSaveTab === tab ? c.toolActiveTxt : c.docMuted,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: "12px",
+                      fontWeight: 850,
+                    }}
+                  >
+                    {tab === "drive" ? "Drive" : "Local"}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: "10px",
               }}>
-                {hasGoogleDriveToken(authSession?.provider_token) ? (
+                {workspaceSaveTab === "drive" ? (
+                hasGoogleDriveToken(authSession?.provider_token) ? (
                   isLoadingDriveFiles ? (
                     <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
                       Loading Drive PDFs...
@@ -4578,6 +4790,106 @@ export default function EditorPage() {
                 ) : (
                   <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
                     Sign in with Google to see saved PDFs from Drive here.
+                  </div>
+                )
+                ) : recentLocalDrafts.length ? (
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "12px",
+                  }}>
+                    {recentLocalDrafts.map(item => (
+                      <button
+                        key={item.docId}
+                        type="button"
+                        onClick={() => void loadLocalDraftById(item.docId)}
+                        style={{
+                          border: `1px solid ${c.headerBorder}`,
+                          borderRadius: "18px",
+                          padding: 0,
+                          overflow: "hidden",
+                          background: dm ? "rgba(20,25,35,0.72)" : "#FFFFFF",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          textAlign: "left",
+                          boxShadow: item.docId === currentDocId
+                            ? (dm ? "0 0 0 2px rgba(229,212,255,0.22)" : "0 0 0 2px rgba(229,212,255,0.62)")
+                            : "0 10px 24px rgba(142,141,155,0.08)",
+                        }}
+                      >
+                        <div style={{
+                          height: "130px",
+                          background: dm ? "#111722" : "#F8F6FD",
+                          borderBottom: `1px solid ${c.headerBorder}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          overflow: "hidden",
+                          position: "relative",
+                        }}>
+                          {item.previewDataUrl ? (
+                            <img
+                              src={item.previewDataUrl}
+                              alt=""
+                              style={{
+                                width: "82%",
+                                height: "112%",
+                                objectFit: "cover",
+                                objectPosition: "top center",
+                                borderRadius: "6px",
+                                boxShadow: dm ? "0 10px 28px rgba(0,0,0,0.22)" : "0 10px 28px rgba(142,141,155,0.15)",
+                              }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: "64%",
+                              height: "82%",
+                              borderRadius: "6px",
+                              background: dm ? "#1C2230" : "#FFFFFF",
+                              border: `1px solid ${c.headerBorder}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: c.docMuted,
+                            }}>
+                              <BlankPageIcon size={28} />
+                            </div>
+                          )}
+                          {item.docId === currentDocId && (
+                            <span style={{
+                              position: "absolute",
+                              top: "8px",
+                              right: "8px",
+                              borderRadius: "999px",
+                              padding: "5px 8px",
+                              background: c.toolActive,
+                              color: c.toolActiveTxt,
+                              fontSize: "9px",
+                              fontWeight: 900,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                            }}>
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "5px", minWidth: 0 }}>
+                          <span style={{ fontSize: "13px", fontWeight: 850, color: c.docText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {item.title || "Untitled document"}
+                          </span>
+                          <span style={{ fontSize: "10px", color: c.docMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {new Date(item.savedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                          <span style={{ fontSize: "10px", color: c.docMuted }}>
+                            {item.pageCount} page{item.pageCount === 1 ? "" : "s"} · Local
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
+                    No local saves yet. Edit or save a document and it will appear here.
                   </div>
                 )}
               </div>

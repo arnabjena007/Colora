@@ -2681,33 +2681,39 @@ export default function EditorPage() {
       const x = note.x * scaleX;
       const y = note.y * scaleY;
       const w = 170 * scaleX;
-      const h = Math.max(80, 56 + Math.ceil(note.text.length / 22) * 18) * scaleY;
+      const padX = 12 * scaleX;
+      const padY = 12 * scaleY;
+      const lineHeight = 24 * scaleY;
       ctx.save();
-      ctx.fillStyle = "#FEFCEC";
-      ctx.strokeStyle = "#EDE5A0";
-      ctx.lineWidth = 1.5 * Math.max(scaleX, scaleY);
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, 12 * Math.max(scaleX, scaleY));
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#777052";
-      ctx.font = `${13 * Math.max(scaleX, scaleY)}px 'Instrument Sans', Arial, sans-serif`;
+      ctx.font = `${18 * scaleY}px 'Excalifont', 'Instrument Sans', Arial, sans-serif`;
       ctx.textBaseline = "top";
       const words = note.text.split(/\s+/);
+      const lines: string[] = [];
       let line = "";
-      let lineY = y + 12 * scaleY;
-      const maxWidth = w - 24 * scaleX;
+      const maxWidth = w - padX * 2;
       words.forEach(word => {
         const next = line ? `${line} ${word}` : word;
         if (ctx.measureText(next).width > maxWidth && line) {
-          ctx.fillText(line, x + 12 * scaleX, lineY);
+          lines.push(line);
           line = word;
-          lineY += 18 * scaleY;
         } else {
           line = next;
         }
       });
-      if (line) ctx.fillText(line, x + 12 * scaleX, lineY);
+      if (line) lines.push(line);
+
+      const h = Math.max(80 * scaleY, padY * 2 + Math.max(1, lines.length) * lineHeight);
+      ctx.fillStyle = "#FEFCEC";
+      ctx.strokeStyle = "#D1B84F";
+      ctx.lineWidth = 2 * Math.max(scaleX, scaleY);
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 12 * Math.max(scaleX, scaleY));
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#6F663A";
+      lines.forEach((textLine, index) => {
+        ctx.fillText(textLine, x + padX, y + padY + index * lineHeight);
+      });
       ctx.restore();
     });
   };
@@ -2916,7 +2922,11 @@ export default function EditorPage() {
         const source = pagesRef.current[i];
         const page = await source.doc.getPage(source.pageNumber);
         const baseVp = page.getViewport({ scale: 1 });
-        const scale = Math.min(3, Math.max(1.5, 2200 / baseVp.width));
+        const state = pageStoreRef.current.get(i + 1);
+        const editorWidth = state?.canvasWidth ?? baseVp.width;
+        const editorScale = editorWidth / baseVp.width;
+        const exportScale = Math.min(3, Math.max(1.5, 2200 / editorWidth));
+        const scale = editorScale * exportScale;
         const vp = page.getViewport({ scale });
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(vp.width);
@@ -2925,7 +2935,6 @@ export default function EditorPage() {
         if (!ctx) continue;
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
 
-      const state = pageStoreRef.current.get(i + 1);
       if (state) {
         const ann = document.createElement("canvas");
         ann.width = state.canvasWidth;
@@ -2938,7 +2947,7 @@ export default function EditorPage() {
         ctx.drawImage(ann, 0, 0, canvas.width, canvas.height);
         await drawPicturesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
         drawTextAnnotationsForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
-          drawNotesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
+        drawNotesForExport(ctx, state, canvas.width / state.canvasWidth, canvas.height / state.canvasHeight);
         }
         if (includePageNumbersRef.current) {
           drawPageNumber(ctx, canvas.width, canvas.height, i + 1, pagesRef.current.length);
@@ -3237,8 +3246,8 @@ export default function EditorPage() {
     panelBg: dm ? "#1C2230" : "#FFFFFF",
     panelBorder: dm ? "#333B4D" : "#ECEAF3",
     noteBg: dm ? "#2A2532" : "#FEFCEC",
-    noteBorder: dm ? "#51445F" : "#EDE5A0",
-    noteTxt: dm ? "#F6EAF2" : "#777052",
+    noteBorder: dm ? "#7A638B" : "#D1B84F",
+    noteTxt: dm ? "#F6EAF2" : "#6F663A",
     inputColor: dm ? "#F2F4F8" : "#5E5D6A",
     shadow: dm
       ? "0 24px 70px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.05)"
@@ -4796,10 +4805,10 @@ export default function EditorPage() {
                   }}
                   onBlur={e => updateNote(note.id, e.currentTarget.innerText)}
                   style={{
-                    fontSize: "13px", color: c.noteTxt,
-                    outline: "none", minHeight: "44px",
+                    fontSize: "18px", color: c.noteTxt,
+                    outline: "none", minHeight: "52px",
                     marginTop: "4px", paddingRight: "16px",
-                    lineHeight: "1.55", userSelect: "text",
+                    lineHeight: "1.35", userSelect: "text",
                   }}
                 >
                   {note.text || NOTE_PLACEHOLDER}

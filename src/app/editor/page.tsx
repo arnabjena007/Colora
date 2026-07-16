@@ -2787,6 +2787,31 @@ export default function EditorPage() {
   };
 
   // ─── PDF LOAD ─────────────────────────────────────────────────────
+  const replaceCurrentDocumentWithPages = async (
+    loadedPages: PdfPageSource[],
+    options?: { originalBytes?: Uint8Array | null; docName?: string }
+  ) => {
+    if (!loadedPages.length) return false;
+    originalPdfBytesRef.current = options?.originalBytes ?? null;
+    originalPdfPageCountRef.current = options?.originalBytes ? loadedPages.length : 0;
+    pagesRef.current = loadedPages;
+    pdfDocRef.current = loadedPages[0].doc;
+    pageStoreRef.current.clear();
+    undoListRef.current = [];
+    redoListRef.current = [];
+    setNotes([]);
+    setTextAnnotations([]);
+    setPictures([]);
+    setEditingTextId(null);
+    setCurrentDocId(crypto.randomUUID());
+    setDocTitle((options?.docName || loadedPages[0].name).replace(/\.[^/.]+$/, "") || "Untitled");
+    setDocSubtitle(`${loadedPages.length} page${loadedPages.length === 1 ? "" : "s"}`);
+    setTotalPages(loadedPages.length);
+    setIsPdfLoaded(true);
+    await renderPage(1);
+    return true;
+  };
+
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length) return;
@@ -2797,24 +2822,10 @@ export default function EditorPage() {
       const originalBytes = canPreserveOriginal ? new Uint8Array(await firstFile.arrayBuffer()) : null;
       const loadedPages = await readDocumentFiles(files);
       if (!loadedPages.length) return;
-      originalPdfBytesRef.current = originalBytes;
-      originalPdfPageCountRef.current = originalBytes ? loadedPages.length : 0;
-      pagesRef.current = loadedPages;
-      pdfDocRef.current = loadedPages[0].doc;
-      pageStoreRef.current.clear();
-      undoListRef.current = [];
-      redoListRef.current = [];
-      setNotes([]);
-      setTextAnnotations([]);
-      setPictures([]);
-      setEditingTextId(null);
-      const firstName = loadedPages[0].name.replace(/\.[^/.]+$/, "") || "Untitled";
-      setCurrentDocId(crypto.randomUUID());
-      setDocTitle(firstName);
-      setDocSubtitle(`${loadedPages.length} page${loadedPages.length === 1 ? "" : "s"}`);
-      setTotalPages(loadedPages.length);
-      setIsPdfLoaded(true);
-      renderPage(1);
+      await replaceCurrentDocumentWithPages(loadedPages, {
+        originalBytes,
+        docName: loadedPages[0].name,
+      });
       toast("File loaded");
     } catch {
       toast("Error loading file");
@@ -3644,6 +3655,7 @@ export default function EditorPage() {
       await hydrateLocalState(saved.payload);
       const savedAt = typeof saved.savedAt === "number" ? new Date(saved.savedAt) : new Date();
       setLastSavedLabel(`Recovered ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+      setShowWorkspacePanel(false);
       toast("Last local draft opened");
       return true;
     } catch {
@@ -3739,6 +3751,46 @@ export default function EditorPage() {
       return false;
     }
   }, [hydrateLocalState, refreshRecentLocalDrafts, toast]);
+
+  const loadDrivePdfById = useCallback(async (file: DriveProjectPdf): Promise<boolean> => {
+    const token = authSessionRef.current?.provider_token;
+    if (!hasGoogleDriveToken(token)) {
+      toast("Sign in again to open Drive files");
+      return false;
+    }
+
+    try {
+      setIsLoadingDriveFiles(true);
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Could not download Drive PDF");
+      const blob = await response.blob();
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const pdfjs = pdfjsLibRef.current;
+      if (!pdfjs) throw new Error("PDF engine unavailable");
+      const pdf = await pdfjs.getDocument(bytes).promise;
+      const loadedPages: PdfPageSource[] = [];
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        loadedPages.push({ doc: pdf, pageNumber, name: file.name });
+      }
+      await replaceCurrentDocumentWithPages(loadedPages, {
+        originalBytes: bytes,
+        docName: file.name,
+      });
+      setShowWorkspacePanel(false);
+      toast("Drive PDF opened");
+      return true;
+    } catch {
+      toast("Could not open Drive PDF");
+      return false;
+    } finally {
+      setIsLoadingDriveFiles(false);
+    }
+  }, [replaceCurrentDocumentWithPages, toast]);
 
   useEffect(() => {
     refreshRecentLocalDrafts();
@@ -4738,11 +4790,10 @@ export default function EditorPage() {
                       Loading Drive PDFs...
                     </div>
                   ) : driveProjectPdfs.length ? driveProjectPdfs.map(file => (
-                  <a
+                  <button
                     key={file.id}
-                    href={file.webViewLink || "#"}
-                    target="_blank"
-                    rel="noreferrer"
+                    type="button"
+                    onClick={() => void loadDrivePdfById(file)}
                     style={{
                       border: `1px solid ${c.headerBorder}`,
                       borderRadius: "16px",
@@ -4750,7 +4801,7 @@ export default function EditorPage() {
                       background: dm ? "rgba(20,25,35,0.72)" : "#FFFFFF",
                       cursor: "pointer",
                       fontFamily: "inherit",
-                      textDecoration: "none",
+                      textAlign: "left",
                       display: "grid",
                       gridTemplateColumns: "42px minmax(0, 1fr) auto",
                       alignItems: "center",
@@ -4779,9 +4830,9 @@ export default function EditorPage() {
                       </span>
                     </div>
                     <span style={{ fontSize: "10px", color: c.docMuted, fontWeight: 800, whiteSpace: "nowrap" }}>
-                      {formatDriveFileSize(file.size) || "PDF"}
+                      {formatDriveFileSize(file.size) || "OPEN"}
                     </span>
-                  </a>
+                  </button>
                   )) : (
                     <div style={{ fontSize: "12px", color: c.docMuted, lineHeight: 1.6, padding: "8px 2px" }}>
                       No Drive PDFs yet. Use Save now to add one to colora-projects.

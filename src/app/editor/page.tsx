@@ -3305,11 +3305,9 @@ export default function EditorPage() {
       ? "0 24px 70px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.05)"
       : "0 4px 28px rgba(142,141,155,0.14), 0 1px 4px rgba(142,141,155,0.08)",
   };
-  const activePalette = activeTool === "text" || activeTool === "signature"
+  const activePalette = activeTool === "text" || activeTool === "signature" || activeTool === "highlighter"
     ? TEXT_PALETTE
-    : activeTool === "highlighter"
-      ? HIGHLIGHT_PALETTE
-      : PALETTE;
+    : PALETTE;
   const toolbarIconSize = 16;
   const sideIconSize = 16;
   const toolBtn = (id: string, icon: React.ReactNode, label: string, action?: () => void) => {
@@ -3525,20 +3523,6 @@ export default function EditorPage() {
               />
             ))}
           </div>
-          {activeTool === "highlighter" && (
-            <>
-              <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={clearCurrentTextHighlight}
-                title="Remove text highlight"
-                style={alignBtnStyle(currentTextHasHighlight())}
-              >
-                <EraserTrailIcon size={17} />
-              </button>
-            </>
-          )}
           {(activeTool === "pencil" || activeTool === "eraser") && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
@@ -3735,7 +3719,7 @@ export default function EditorPage() {
               </select>
             </>
           )}
-          {activeTool === "select" && (
+          {activeTool === "select" && selectedObject?.kind !== "text" && !editingTextId && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>

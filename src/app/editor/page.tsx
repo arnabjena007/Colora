@@ -842,6 +842,26 @@ const dataUrlToImageData = async (src: string, width: number, height: number) =>
 const cloneImageData = (imageData: ImageData) =>
   new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
 
+const fitImageDataToSize = (imageData: ImageData, width: number, height: number) => {
+  if (imageData.width === width && imageData.height === height) {
+    return cloneImageData(imageData);
+  }
+
+  const source = document.createElement("canvas");
+  source.width = imageData.width;
+  source.height = imageData.height;
+  source.getContext("2d")?.putImageData(imageData, 0, 0);
+
+  const target = document.createElement("canvas");
+  target.width = width;
+  target.height = height;
+  const targetCtx = target.getContext("2d");
+  if (!targetCtx) return cloneImageData(imageData);
+  targetCtx.clearRect(0, 0, width, height);
+  targetCtx.drawImage(source, 0, 0, width, height);
+  return targetCtx.getImageData(0, 0, width, height);
+};
+
 const cloneCanvasStroke = (stroke: CanvasStroke): CanvasStroke =>
   stroke.kind === "pencil"
     ? { ...stroke, points: stroke.points.map(point => ({ ...point })) }
@@ -1181,7 +1201,7 @@ export default function EditorPage() {
     const canvas = annotCanvasRef.current;
     if (!canvas || canvas.width === 0 || !baseImageDataRef.current) return null;
     return {
-      baseImageData: cloneImageData(baseImageDataRef.current),
+      baseImageData: fitImageDataToSize(baseImageDataRef.current, canvas.width, canvas.height),
       canvasWidth: canvas.width,
       canvasHeight: canvas.height,
       notes: notesRef.current.map(n => ({ ...n })),
@@ -1221,7 +1241,7 @@ export default function EditorPage() {
     const annC = annotCanvasRef.current;
     if (!annC || annC.width === 0 || num <= 0 || !baseImageDataRef.current) return;
     pageStoreRef.current.set(num, {
-      baseImageData: cloneImageData(baseImageDataRef.current),
+      baseImageData: fitImageDataToSize(baseImageDataRef.current, annC.width, annC.height),
       canvasWidth: annC.width,
       canvasHeight: annC.height,
       undoStack: [...undoListRef.current],
@@ -2995,7 +3015,7 @@ export default function EditorPage() {
         ann.height = state.canvasHeight;
         const annCtx = ann.getContext("2d");
         if (annCtx) {
-          annCtx.putImageData(state.baseImageData, 0, 0);
+          annCtx.putImageData(fitImageDataToSize(state.baseImageData, state.canvasWidth, state.canvasHeight), 0, 0);
           drawCanvasStrokes(annCtx, state.strokes);
         }
         ctx.drawImage(ann, 0, 0, canvas.width, canvas.height);

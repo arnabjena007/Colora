@@ -235,9 +235,9 @@ const isShapeTool = (tool: string): tool is ShapeTool => SHAPE_TOOLS.has(tool);
 function EraserTrailIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 17.5c3.6 2.1 7.3 2.1 11.2.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.45" />
-      <path d="M7.1 12.4 13.5 6a2.1 2.1 0 0 1 3 0l1.5 1.5a2.1 2.1 0 0 1 0 3l-6.4 6.4a2.4 2.4 0 0 1-1.7.7H6.8a1.1 1.1 0 0 1-1.1-1.1v-2.4c0-.6.2-1.2.7-1.7Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="m11.2 8.3 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M4 17.5c3.6 2.1 7.3 2.1 11.2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.45" />
+      <path d="M7.1 12.4 13.5 6a2.1 2.1 0 0 1 3 0l1.5 1.5a2.1 2.1 0 0 1 0 3l-6.4 6.4a2.4 2.4 0 0 1-1.7.7H6.8a1.1 1.1 0 0 1-1.1-1.1v-2.4c0-.6.2-1.2.7-1.7Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m11.2 8.3 4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -3522,6 +3522,20 @@ export default function EditorPage() {
               />
             ))}
           </div>
+          {activeTool === "highlighter" && (
+            <>
+              <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={clearCurrentTextHighlight}
+                title="Remove text highlight"
+                style={alignBtnStyle(currentTextHasHighlight())}
+              >
+                <EraserTrailIcon size={17} />
+              </button>
+            </>
+          )}
           {(activeTool === "pencil" || activeTool === "eraser") && (
             <>
               <div style={{ width: "1px", height: "24px", background: c.headerBorder }} />
@@ -3637,9 +3651,6 @@ export default function EditorPage() {
                 </button>
                 <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextStyle("underline", !textUnderline)} title="Underline" style={alignBtnStyle(textUnderline)}>
                   <Underline size={14} />
-                </button>
-                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={clearCurrentTextHighlight} title="Remove highlight" style={alignBtnStyle(currentTextHasHighlight())}>
-                  <EraserTrailIcon size={15} />
                 </button>
               </div>
             </div>
@@ -4203,8 +4214,8 @@ export default function EditorPage() {
               >
                 <div
                   style={{
-                    width: "22px",
-                    height: "22px",
+                    width: "24px",
+                    height: "24px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -4212,7 +4223,7 @@ export default function EditorPage() {
                     background: activeTool === "eraser" ? "rgba(255,255,255,0.28)" : "transparent",
                   }}
                 >
-                  <EraserTrailIcon size={18} />
+                  <EraserTrailIcon size={21} />
                 </div>
                 <span>Eraser</span>
               </button>

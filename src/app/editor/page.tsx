@@ -381,6 +381,20 @@ const mergeHighlightRanges = (ranges: TextHighlightRange[] = [], next: TextHighl
   return merged;
 };
 
+const removeHighlightRanges = (ranges: TextHighlightRange[] = [], start?: number, end?: number) => {
+  if (start === undefined || end === undefined || start === end) return [];
+  const removeStart = Math.min(start, end);
+  const removeEnd = Math.max(start, end);
+
+  return ranges.flatMap(range => {
+    if (range.end <= removeStart || range.start >= removeEnd) return [range];
+    const next: TextHighlightRange[] = [];
+    if (range.start < removeStart) next.push({ ...range, end: removeStart });
+    if (range.end > removeEnd) next.push({ ...range, start: removeEnd });
+    return next;
+  });
+};
+
 const highlightMarkerStyle = (color: string): React.CSSProperties => ({
   display: "inline",
   padding: "0.05em 0.42em 0.17em",
@@ -2246,6 +2260,41 @@ export default function EditorPage() {
     return "none";
   };
 
+  const currentTextHasHighlight = () => {
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObject?.kind === "text" ? selectedObject.id : null);
+    if (!targetId) return false;
+    return Boolean(textAnnotations.find(t => t.id === targetId)?.highlights?.length);
+  };
+
+  const clearCurrentTextHighlight = () => {
+    const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
+    if (!targetId) {
+      toast("Select a text box first");
+      return;
+    }
+
+    const input = document.querySelector<HTMLTextAreaElement>(`.text-annotation-input[data-text-id="${CSS.escape(targetId)}"]`);
+    const selectionStart = input?.selectionStart;
+    const selectionEnd = input?.selectionEnd;
+    const hasSelection = typeof selectionStart === "number" && typeof selectionEnd === "number" && selectionStart !== selectionEnd;
+
+    setTextAnnotations(prev => prev.map(t => {
+      if (t.id !== targetId) return t;
+      return {
+        ...t,
+        highlightColor: undefined,
+        highlights: hasSelection
+          ? removeHighlightRanges(t.highlights, selectionStart, selectionEnd)
+          : [],
+      };
+    }));
+    toast(hasSelection ? "Highlight removed" : "Text highlights cleared");
+    requestAnimationFrame(() => {
+      input?.focus();
+      if (hasSelection) input?.setSelectionRange(selectionStart, selectionEnd);
+    });
+  };
+
   const setTextListStyle = (listStyle: ListStyle) => {
     setTextListStyleState(listStyle);
     const targetId = editingTextId ?? activeTextIdRef.current ?? (selectedObjectRef.current?.kind === "text" ? selectedObjectRef.current.id : null);
@@ -3588,6 +3637,9 @@ export default function EditorPage() {
                 </button>
                 <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setTextStyle("underline", !textUnderline)} title="Underline" style={alignBtnStyle(textUnderline)}>
                   <Underline size={14} />
+                </button>
+                <button onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={clearCurrentTextHighlight} title="Remove highlight" style={alignBtnStyle(currentTextHasHighlight())}>
+                  <EraserTrailIcon size={15} />
                 </button>
               </div>
             </div>

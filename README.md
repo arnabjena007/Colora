@@ -17,7 +17,7 @@
 
 ## Demo
 
-https://github.com/arnabjena007/Colora/raw/refs/heads/main/public/assets/colora-demo.mp4
+https://github.com/user-attachments/assets/c21dbb6c-9ea2-4ffe-ab8b-2e262e1f3257
 
 [Open or download the Colora demo video](public/assets/colora-demo.mp4)
 
@@ -65,12 +65,6 @@ Colora is browser-first. The active document, annotation layers, and tool state 
 ### PDF Export Pipeline
 
 ![Colora PDF export pipeline](public/architecture/03-export-pipeline.png)
-
-The diagrams are generated with the project’s Excalifont and RoughJS. Run the generator after changing their content:
-
-```bash
-node scripts/generate-architecture-diagrams.cjs
-```
 
 ---
 

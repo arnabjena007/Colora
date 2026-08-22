@@ -19,8 +19,6 @@
 
 https://github.com/user-attachments/assets/c21dbb6c-9ea2-4ffe-ab8b-2e262e1f3257
 
-[Open or download the Colora demo video](public/assets/colora-demo.mp4)
-
 ---
 
 ## What Colora Does

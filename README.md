@@ -17,11 +17,9 @@
 
 ## Demo
 
-<video src="https://raw.githubusercontent.com/arnabjena007/Colora/main/public/assets/colora-demo.mp4" controls width="100%">
-  Your browser does not support embedded video. Open the demo using the link below.
-</video>
+https://github.com/arnabjena007/Colora/raw/refs/heads/main/public/assets/colora-demo.mp4
 
-> GitHub may show the demo as a link instead of an inline player on some devices. [Open or download the Colora demo video](public/assets/colora-demo.mp4).
+[Open or download the Colora demo video](public/assets/colora-demo.mp4)
 
 ---
 
